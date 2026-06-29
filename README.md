@@ -30,6 +30,47 @@ dist/Altp.app
 open dist/Altp.app
 ```
 
+默认 Bundle ID 是：
+
+```text
+com.miracleagi.altp
+```
+
+本地开发构建会优先使用 `Apple Development` 证书签名；如果没有可用证书，脚本会失败，避免退回 ad-hoc 签名导致辅助功能权限在每次 rebuild 后失效。临时测试可以显式允许 ad-hoc：
+
+```bash
+ALTP_ALLOW_ADHOC=1 ./scripts/build_app.sh
+```
+
+## 发布
+
+正式发给其他人使用时，需要使用 `Developer ID Application` 证书签名并提交 Apple notarization：
+
+```bash
+xcrun notarytool store-credentials altp-notary \
+  --apple-id <apple-id> \
+  --team-id <team-id> \
+  --password <app-specific-password>
+```
+
+生成发布包：
+
+```bash
+ALTP_NOTARY_KEYCHAIN_PROFILE=altp-notary ./scripts/release.sh
+```
+
+发布脚本会执行：
+
+```text
+build -> Developer ID signing -> zip -> notarization -> staple -> final zip
+```
+
+最终产物：
+
+```text
+dist/release/Altp-0.1.0-macOS.zip
+```
+
 ## 权限
 
 macOS 要求授予辅助功能权限后，App 才能读取和聚焦其他 App 的窗口。首次运行会弹出授权提示；也可以手动打开：

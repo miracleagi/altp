@@ -3,6 +3,9 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APP_NAME="Altp"
+APP_VERSION="${ALTP_VERSION:-0.1.0}"
+APP_BUILD="${ALTP_BUILD:-1}"
+BUNDLE_ID="${ALTP_BUNDLE_ID:-com.miracleagi.altp}"
 APP_DIR="$ROOT_DIR/dist/$APP_NAME.app"
 CONTENTS_DIR="$APP_DIR/Contents"
 MACOS_DIR="$CONTENTS_DIR/MacOS"
@@ -35,7 +38,7 @@ cat > "$CONTENTS_DIR/Info.plist" <<PLIST
     <key>CFBundleExecutable</key>
     <string>$APP_NAME</string>
     <key>CFBundleIdentifier</key>
-    <string>local.altp.app</string>
+    <string>$BUNDLE_ID</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>
@@ -43,9 +46,9 @@ cat > "$CONTENTS_DIR/Info.plist" <<PLIST
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>0.1.0</string>
+    <string>$APP_VERSION</string>
     <key>CFBundleVersion</key>
-    <string>1</string>
+    <string>$APP_BUILD</string>
     <key>LSMinimumSystemVersion</key>
     <string>13.0</string>
     <key>LSUIElement</key>
@@ -78,7 +81,12 @@ if command -v codesign >/dev/null 2>&1; then
     fi
 
     if [[ -n "$CODESIGN_IDENTITY" ]]; then
-        codesign --force --deep --timestamp=none --sign "$CODESIGN_IDENTITY" "$APP_DIR"
+        CODESIGN_TIMESTAMP="${ALTP_CODESIGN_TIMESTAMP:-none}"
+        if [[ "$CODESIGN_TIMESTAMP" == "1" || "$CODESIGN_TIMESTAMP" == "true" ]]; then
+            codesign --force --deep --timestamp --sign "$CODESIGN_IDENTITY" "$APP_DIR"
+        else
+            codesign --force --deep --timestamp=none --sign "$CODESIGN_IDENTITY" "$APP_DIR"
+        fi
         echo "Signed with: $CODESIGN_IDENTITY"
     elif [[ "${ALTP_ALLOW_ADHOC:-}" == "1" ]]; then
         codesign --force --deep --sign - "$APP_DIR"
