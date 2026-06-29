@@ -2,6 +2,7 @@ import AppKit
 import Carbon.HIToolbox
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    private let launchAtLoginArgument = "--launch-at-login"
     private let windowCatalog = WindowCatalog()
     private lazy var searchPanelController = SearchPanelController(catalog: windowCatalog)
     private var hotKeyManager: HotKeyManager?
@@ -13,11 +14,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSLog("Altp did finish launching")
+        LaunchAtLoginManager.migrateLegacyLaunchAgentIfNeeded()
         NSApp.setActivationPolicy(.accessory)
         setupStatusItem()
         setupHotKey()
         _ = AccessibilityPermission.requestIfNeeded()
-        searchPanelController.show()
+
+        if !ProcessInfo.processInfo.arguments.contains(launchAtLoginArgument) {
+            searchPanelController.show()
+        }
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {

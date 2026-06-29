@@ -4,20 +4,48 @@ import ServiceManagement
 enum LaunchAtLoginManager {
     enum Status {
         case enabled
-        case enabledViaLaunchAgent
         case notRegistered
         case requiresApproval
-        case staleLaunchAgent
+        case helperMissing
         case unavailable
     }
 
-    private static let launchAgentLabel = "com.miracleagi.altp.login"
+    private static let legacyLaunchAgentLabel = "com.miracleagi.altp.login"
 
-    private static var launchAgentURL: URL {
+    private static var loginHelperIdentifier: String {
+        "\(Bundle.main.bundleIdentifier ?? "com.miracleagi.altp").login-helper"
+    }
+
+    private static var loginItemService: SMAppService {
+        SMAppService.loginItem(identifier: loginHelperIdentifier)
+    }
+
+    private static var loginHelperAppName: String {
+        let appName = Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String ?? "Altp"
+        return "\(appName) Login Helper.app"
+    }
+
+    private static var embeddedLoginHelperURL: URL {
+        Bundle.main.bundleURL
+            .appendingPathComponent("Contents", isDirectory: true)
+            .appendingPathComponent("Library", isDirectory: true)
+            .appendingPathComponent("LoginItems", isDirectory: true)
+            .appendingPathComponent(loginHelperAppName, isDirectory: true)
+    }
+
+    private static var hasEmbeddedLoginHelper: Bool {
+        guard FileManager.default.fileExists(atPath: embeddedLoginHelperURL.path) else {
+            return false
+        }
+
+        return Bundle(url: embeddedLoginHelperURL)?.bundleIdentifier == loginHelperIdentifier
+    }
+
+    private static var legacyLaunchAgentURL: URL {
         FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library", isDirectory: true)
             .appendingPathComponent("LaunchAgents", isDirectory: true)
-            .appendingPathComponent("\(launchAgentLabel).plist")
+            .appendingPathComponent("\(legacyLaunchAgentLabel).plist")
     }
 
     private static var bundlePath: String {
@@ -29,25 +57,29 @@ enum LaunchAtLoginManager {
     }
 
     static var status: Status {
-        switch SMAppService.mainApp.status {
+        guard isRunningFromApplications else {
+            return .unavailable
+        }
+
+        switch loginItemService.status {
         case .enabled:
             return .enabled
         case .notRegistered:
-            return launchAgentStatusWhenMainAppIsUnavailable(defaultStatus: .notRegistered)
+            return .notRegistered
         case .requiresApproval:
             return .requiresApproval
         case .notFound:
-            return launchAgentStatusWhenMainAppIsUnavailable(defaultStatus: isRunningFromApplications ? .notRegistered : .unavailable)
+            return hasEmbeddedLoginHelper ? .notRegistered : .helperMissing
         @unknown default:
-            return launchAgentStatusWhenMainAppIsUnavailable(defaultStatus: .unavailable)
+            return .unavailable
         }
     }
 
     static var isEnabled: Bool {
         switch status {
-        case .enabled, .enabledViaLaunchAgent:
+        case .enabled:
             return true
-        case .notRegistered, .requiresApproval, .staleLaunchAgent, .unavailable:
+        case .notRegistered, .requiresApproval, .helperMissing, .unavailable:
             return false
         }
     }
@@ -56,14 +88,12 @@ enum LaunchAtLoginManager {
         switch status {
         case .enabled:
             return "Enabled"
-        case .enabledViaLaunchAgent:
-            return "Enabled via LaunchAgent"
         case .notRegistered:
             return "Off"
         case .requiresApproval:
             return "Requires approval in Login Items"
-        case .staleLaunchAgent:
-            return "Login item points to another copy; turn it off and on to repair"
+        case .helperMissing:
+            return "Login helper is missing; rebuild or reinstall Altp.app"
         case .unavailable:
             return "Move Altp.app to Applications and reopen it to enable Launch at Login"
         }
@@ -73,22 +103,28 @@ enum LaunchAtLoginManager {
         switch status {
         case .unavailable:
             return false
-        case .enabled, .enabledViaLaunchAgent, .notRegistered, .requiresApproval, .staleLaunchAgent:
+        case .helperMissing:
+            return false
+        case .enabled, .notRegistered, .requiresApproval:
             return true
         }
     }
 
     static func setEnabled(_ enabled: Bool) throws {
-        switch SMAppService.mainApp.status {
-        case .notFound:
-            try setLaunchAgentEnabled(enabled)
-        default:
-            if enabled {
-                try SMAppService.mainApp.register()
-            } else {
-                try SMAppService.mainApp.unregister()
-                try setLaunchAgentEnabled(false)
+        try removeLegacyLaunchAgentIfPresent()
+
+        if enabled {
+            guard hasEmbeddedLoginHelper else {
+                throw NSError(
+                    domain: "Altp.LaunchAtLogin",
+                    code: 1,
+                    userInfo: [NSLocalizedDescriptionKey: "Login helper is missing"]
+                )
             }
+
+            try loginItemService.register()
+        } else {
+            try loginItemService.unregister()
         }
     }
 
@@ -98,52 +134,47 @@ enum LaunchAtLoginManager {
         }
     }
 
-    private static func launchAgentStatusWhenMainAppIsUnavailable(defaultStatus: Status) -> Status {
-        guard FileManager.default.fileExists(atPath: launchAgentURL.path) else {
-            return defaultStatus
-        }
-
-        if launchAgentBundlePath() == bundlePath {
-            return .enabledViaLaunchAgent
-        }
-
-        return .staleLaunchAgent
-    }
-
-    private static func setLaunchAgentEnabled(_ enabled: Bool) throws {
-        let fileManager = FileManager.default
-
-        if !enabled {
-            if fileManager.fileExists(atPath: launchAgentURL.path) {
-                try fileManager.removeItem(at: launchAgentURL)
-            }
+    static func migrateLegacyLaunchAgentIfNeeded() {
+        guard isRunningFromApplications,
+              legacyLaunchAgentBundlePath() == bundlePath else {
             return
         }
 
-        let launchAgentsURL = launchAgentURL.deletingLastPathComponent()
-        try fileManager.createDirectory(at: launchAgentsURL, withIntermediateDirectories: true)
-
-        let plist: [String: Any] = [
-            "Label": launchAgentLabel,
-            "ProgramArguments": [
-                "/usr/bin/open",
-                "-g",
-                "-j",
-                bundlePath
-            ],
-            "RunAtLoad": true
-        ]
-
-        let data = try PropertyListSerialization.data(
-            fromPropertyList: plist,
-            format: .xml,
-            options: 0
-        )
-        try data.write(to: launchAgentURL, options: .atomic)
+        switch loginItemService.status {
+        case .enabled:
+            try? removeLegacyLaunchAgentIfPresent()
+        case .notRegistered:
+            registerLoginItemForLegacyMigration()
+        case .requiresApproval:
+            break
+        case .notFound where hasEmbeddedLoginHelper:
+            registerLoginItemForLegacyMigration()
+        case .notFound:
+            NSLog("Altp login helper is missing; legacy login item was left unchanged")
+        @unknown default:
+            break
+        }
     }
 
-    private static func launchAgentBundlePath() -> String? {
-        guard let data = try? Data(contentsOf: launchAgentURL),
+    private static func registerLoginItemForLegacyMigration() {
+        do {
+            try loginItemService.register()
+            try? removeLegacyLaunchAgentIfPresent()
+        } catch {
+            NSLog("Altp could not migrate legacy login item: \(error)")
+        }
+    }
+
+    private static func removeLegacyLaunchAgentIfPresent() throws {
+        guard FileManager.default.fileExists(atPath: legacyLaunchAgentURL.path) else {
+            return
+        }
+
+        try FileManager.default.removeItem(at: legacyLaunchAgentURL)
+    }
+
+    private static func legacyLaunchAgentBundlePath() -> String? {
+        guard let data = try? Data(contentsOf: legacyLaunchAgentURL),
               let plist = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil),
               let dictionary = plist as? [String: Any],
               let arguments = dictionary["ProgramArguments"] as? [String] else {

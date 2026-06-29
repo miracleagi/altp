@@ -348,16 +348,13 @@ final class PreferencesWindowController: NSWindowController {
         case .enabled:
             launchAtLoginSwitch.state = .on
             launchStatusLabel.textColor = .secondaryLabelColor
-        case .enabledViaLaunchAgent:
-            launchAtLoginSwitch.state = .on
-            launchStatusLabel.textColor = .secondaryLabelColor
         case .notRegistered:
             launchAtLoginSwitch.state = .off
             launchStatusLabel.textColor = .secondaryLabelColor
         case .requiresApproval:
             launchAtLoginSwitch.state = .off
             launchStatusLabel.textColor = .systemOrange
-        case .staleLaunchAgent:
+        case .helperMissing:
             launchAtLoginSwitch.state = .off
             launchStatusLabel.textColor = .systemOrange
         case .unavailable:

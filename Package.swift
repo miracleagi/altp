@@ -8,7 +8,8 @@ let package = Package(
         .macOS(.v13)
     ],
     products: [
-        .executable(name: "Altp", targets: ["Altp"])
+        .executable(name: "Altp", targets: ["Altp"]),
+        .executable(name: "AltpLoginHelper", targets: ["AltpLoginHelper"])
     ],
     targets: [
         .executableTarget(
@@ -18,6 +19,12 @@ let package = Package(
                 .linkedFramework("ApplicationServices"),
                 .linkedFramework("Carbon"),
                 .linkedFramework("ServiceManagement")
+            ]
+        ),
+        .executableTarget(
+            name: "AltpLoginHelper",
+            linkerSettings: [
+                .linkedFramework("AppKit")
             ]
         )
     ]
