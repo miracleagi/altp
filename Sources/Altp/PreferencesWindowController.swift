@@ -153,6 +153,7 @@ final class PreferencesWindowController: NSWindowController {
         label.font = .systemFont(ofSize: 12)
         label.textColor = .secondaryLabelColor
         label.lineBreakMode = .byTruncatingTail
+        label.maximumNumberOfLines = 2
 
         let spacer = NSView()
         spacer.translatesAutoresizingMaskIntoConstraints = false
@@ -179,6 +180,7 @@ final class PreferencesWindowController: NSWindowController {
     private func refreshLaunchAtLoginStatus() {
         let status = LaunchAtLoginManager.status
         launchAtLoginCheckbox.allowsMixedState = true
+        launchAtLoginCheckbox.isEnabled = LaunchAtLoginManager.canUpdateRegistration
 
         switch status {
         case .enabled:
@@ -221,6 +223,11 @@ final class PreferencesWindowController: NSWindowController {
     }
 
     @objc private func toggleLaunchAtLogin() {
+        guard LaunchAtLoginManager.canUpdateRegistration else {
+            refreshLaunchAtLoginStatus()
+            return
+        }
+
         let shouldEnable = launchAtLoginCheckbox.state == .on
 
         do {

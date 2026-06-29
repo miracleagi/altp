@@ -19,10 +19,14 @@ enum LaunchAtLoginManager {
         case .requiresApproval:
             return "Requires approval in Login Items"
         case .notFound:
-            return "App bundle not found"
+            return "Move Altp.app to Applications and reopen it to enable Launch at Login"
         @unknown default:
             return "Unknown"
         }
+    }
+
+    static var canUpdateRegistration: Bool {
+        status != .notFound
     }
 
     static func setEnabled(_ enabled: Bool) throws {
