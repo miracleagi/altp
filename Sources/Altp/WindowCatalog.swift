@@ -240,11 +240,12 @@ private func axFrame(_ element: AXUIElement) -> CGRect? {
 }
 
 private func axPoint(_ element: AXUIElement, _ attribute: CFString) -> CGPoint? {
-    guard let rawValue = copyAttribute(element, attribute) else {
+    guard let rawValue = copyAttribute(element, attribute),
+          CFGetTypeID(rawValue) == AXValueGetTypeID() else {
         return nil
     }
 
-    let value = rawValue as! AXValue
+    let value = unsafeBitCast(rawValue, to: AXValue.self)
     guard AXValueGetType(value) == .cgPoint else {
         return nil
     }
@@ -257,11 +258,12 @@ private func axPoint(_ element: AXUIElement, _ attribute: CFString) -> CGPoint? 
 }
 
 private func axSize(_ element: AXUIElement, _ attribute: CFString) -> CGSize? {
-    guard let rawValue = copyAttribute(element, attribute) else {
+    guard let rawValue = copyAttribute(element, attribute),
+          CFGetTypeID(rawValue) == AXValueGetTypeID() else {
         return nil
     }
 
-    let value = rawValue as! AXValue
+    let value = unsafeBitCast(rawValue, to: AXValue.self)
     guard AXValueGetType(value) == .cgSize else {
         return nil
     }
