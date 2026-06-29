@@ -76,6 +76,26 @@ final class WindowItem: NSObject {
         .joined(separator: " ")
         .lowercased()
     }
+
+    var memoryKey: String {
+        [
+            normalizedIdentityPart(bundleIdentifier ?? appName),
+            normalizedIdentityPart(title),
+            normalizedIdentityPart(subrole)
+        ]
+        .joined(separator: "|")
+    }
+
+    var quickSwitchKey: String {
+        let frameKey: String
+        if let frame {
+            frameKey = "\(Int(frame.origin.x)),\(Int(frame.origin.y)),\(Int(frame.width)),\(Int(frame.height))"
+        } else {
+            frameKey = "no-frame"
+        }
+
+        return "\(app.processIdentifier)|\(memoryKey)|\(frameKey)"
+    }
 }
 
 final class WindowCatalog {
@@ -273,4 +293,12 @@ private func axSize(_ element: AXUIElement, _ attribute: CFString) -> CGSize? {
         return nil
     }
     return size
+}
+
+private func normalizedIdentityPart(_ value: String) -> String {
+    value
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+        .lowercased()
+        .split(separator: " ")
+        .joined(separator: " ")
 }

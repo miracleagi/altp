@@ -18,8 +18,10 @@ final class PreferencesWindowController: NSWindowController {
     private let generalPane = NSView()
     private let permissionsPane = NSView()
 
-    private let shortcutButton = ShortcutRecorderButton(shortcut: AppSettings.shortcut)
-    private let hotKeyStatusLabel = NSTextField(labelWithString: "")
+    private let searchShortcutButton = ShortcutRecorderButton(shortcut: AppSettings.searchShortcut)
+    private let searchHotKeyStatusLabel = NSTextField(labelWithString: "")
+    private let quickSwitchShortcutButton = ShortcutRecorderButton(shortcut: AppSettings.quickSwitchShortcut)
+    private let quickSwitchHotKeyStatusLabel = NSTextField(labelWithString: "")
 
     private let launchAtLoginSwitch = NSSwitch()
     private let launchStatusLabel = NSTextField(labelWithString: "")
@@ -32,7 +34,7 @@ final class PreferencesWindowController: NSWindowController {
 
     init() {
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 620, height: 370),
+            contentRect: NSRect(x: 0, y: 0, width: 620, height: 430),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
@@ -62,13 +64,19 @@ final class PreferencesWindowController: NSWindowController {
         window?.makeKeyAndOrderFront(sender)
     }
 
-    func updateHotKeyStatus(_ message: String, isError: Bool) {
-        hotKeyStatusLabel.stringValue = message
-        hotKeyStatusLabel.textColor = isError ? .systemRed : .secondaryLabelColor
+    func updateSearchHotKeyStatus(_ message: String, isError: Bool) {
+        searchHotKeyStatusLabel.stringValue = message
+        searchHotKeyStatusLabel.textColor = isError ? .systemRed : .secondaryLabelColor
+    }
+
+    func updateQuickSwitchHotKeyStatus(_ message: String, isError: Bool) {
+        quickSwitchHotKeyStatusLabel.stringValue = message
+        quickSwitchHotKeyStatusLabel.textColor = isError ? .systemRed : .secondaryLabelColor
     }
 
     func refresh() {
-        shortcutButton.shortcut = AppSettings.shortcut
+        searchShortcutButton.shortcut = AppSettings.searchShortcut
+        quickSwitchShortcutButton.shortcut = AppSettings.quickSwitchShortcut
         refreshLaunchAtLoginStatus()
         refreshAccessibilityStatus()
     }
@@ -126,20 +134,34 @@ final class PreferencesWindowController: NSWindowController {
             rootStack.topAnchor.constraint(equalTo: generalPane.topAnchor, constant: 24)
         ])
 
-        let resetButton = secondaryButton(title: "Reset", action: #selector(resetShortcut))
-        shortcutButton.onShortcutChange = { [weak self] shortcut in
-            AppSettings.shortcut = shortcut
-            self?.updateHotKeyStatus("Registering \(shortcut.displayString)...", isError: false)
+        let resetSearchButton = secondaryButton(title: "Reset", action: #selector(resetSearchShortcut))
+        searchShortcutButton.onShortcutChange = { [weak self] shortcut in
+            AppSettings.searchShortcut = shortcut
+            self?.updateSearchHotKeyStatus("Registering \(shortcut.displayString)...", isError: false)
             self?.onShortcutChanged?()
         }
 
-        let shortcutControls = horizontalStack([shortcutButton, resetButton], spacing: 8)
+        let searchShortcutControls = horizontalStack([searchShortcutButton, resetSearchButton], spacing: 8)
+        let resetQuickSwitchButton = secondaryButton(title: "Reset", action: #selector(resetQuickSwitchShortcut))
+        quickSwitchShortcutButton.onShortcutChange = { [weak self] shortcut in
+            AppSettings.quickSwitchShortcut = shortcut
+            self?.updateQuickSwitchHotKeyStatus("Registering \(shortcut.displayString)...", isError: false)
+            self?.onShortcutChanged?()
+        }
+
+        let quickSwitchControls = horizontalStack([quickSwitchShortcutButton, resetQuickSwitchButton], spacing: 8)
         rootStack.addArrangedSubview(settingGroup(rows: [
             settingRow(
-                title: "Keyboard Shortcut",
+                title: "Search Shortcut",
                 detail: "Use this shortcut to show or hide window search.",
-                control: shortcutControls,
-                statusLabel: hotKeyStatusLabel
+                control: searchShortcutControls,
+                statusLabel: searchHotKeyStatusLabel
+            ),
+            settingRow(
+                title: "Quick Switch Shortcut",
+                detail: "Switch to the previous window, then cycle through recent windows.",
+                control: quickSwitchControls,
+                statusLabel: quickSwitchHotKeyStatusLabel
             )
         ]))
 
@@ -387,10 +409,17 @@ final class PreferencesWindowController: NSWindowController {
         }
     }
 
-    @objc private func resetShortcut() {
-        AppSettings.resetShortcut()
-        shortcutButton.shortcut = AppSettings.shortcut
-        updateHotKeyStatus("Registering \(AppSettings.shortcut.displayString)...", isError: false)
+    @objc private func resetSearchShortcut() {
+        AppSettings.resetSearchShortcut()
+        searchShortcutButton.shortcut = AppSettings.searchShortcut
+        updateSearchHotKeyStatus("Registering \(AppSettings.searchShortcut.displayString)...", isError: false)
+        onShortcutChanged?()
+    }
+
+    @objc private func resetQuickSwitchShortcut() {
+        AppSettings.resetQuickSwitchShortcut()
+        quickSwitchShortcutButton.shortcut = AppSettings.quickSwitchShortcut
+        updateQuickSwitchHotKeyStatus("Registering \(AppSettings.quickSwitchShortcut.displayString)...", isError: false)
         onShortcutChanged?()
     }
 

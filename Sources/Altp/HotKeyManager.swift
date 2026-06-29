@@ -1,14 +1,13 @@
 import Carbon
 import Foundation
 
-private let hotKeyEventHandler: EventHandlerUPP = { _, _, userData in
-    guard let userData else {
-        return noErr
+private let hotKeyEventHandler: EventHandlerUPP = { _, event, userData in
+    guard let event, let userData else {
+        return OSStatus(eventNotHandledErr)
     }
 
     let manager = Unmanaged<HotKeyManager>.fromOpaque(userData).takeUnretainedValue()
-    manager.performAction()
-    return noErr
+    return manager.performAction(for: event) ? noErr : OSStatus(eventNotHandledErr)
 }
 
 final class HotKeyManager {
@@ -28,9 +27,14 @@ final class HotKeyManager {
 
     private var hotKeyRef: EventHotKeyRef?
     private var eventHandlerRef: EventHandlerRef?
+    private let hotKeyID: EventHotKeyID
     private let action: () -> Void
 
-    init(keyCode: UInt32, modifiers: UInt32, action: @escaping () -> Void) throws {
+    init(id: UInt32, keyCode: UInt32, modifiers: UInt32, action: @escaping () -> Void) throws {
+        self.hotKeyID = EventHotKeyID(
+            signature: fourCharacterCode("ALTP"),
+            id: id
+        )
         self.action = action
 
         var eventSpec = EventTypeSpec(
@@ -51,15 +55,11 @@ final class HotKeyManager {
             throw RegistrationError.eventHandler(handlerStatus)
         }
 
-        let hotKeyID = EventHotKeyID(
-            signature: fourCharacterCode("ALTP"),
-            id: 1
-        )
-
+        let registrationID = self.hotKeyID
         let hotKeyStatus = RegisterEventHotKey(
             keyCode,
             modifiers,
-            hotKeyID,
+            registrationID,
             GetApplicationEventTarget(),
             0,
             &hotKeyRef
@@ -83,8 +83,26 @@ final class HotKeyManager {
         }
     }
 
-    fileprivate func performAction() {
+    fileprivate func performAction(for event: EventRef) -> Bool {
+        var eventHotKeyID = EventHotKeyID()
+        let status = GetEventParameter(
+            event,
+            EventParamName(kEventParamDirectObject),
+            EventParamType(typeEventHotKeyID),
+            nil,
+            MemoryLayout<EventHotKeyID>.size,
+            nil,
+            &eventHotKeyID
+        )
+
+        guard status == noErr,
+              eventHotKeyID.signature == hotKeyID.signature,
+              eventHotKeyID.id == hotKeyID.id else {
+            return false
+        }
+
         action()
+        return true
     }
 }
 

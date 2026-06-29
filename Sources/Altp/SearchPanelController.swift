@@ -272,24 +272,23 @@ final class SearchPanelController: NSObject {
         let query = searchField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let tokens = query.split(separator: " ").map(String.init)
 
-        if tokens.isEmpty {
-            filteredWindows = allWindows
-        } else {
-            filteredWindows = allWindows
-                .compactMap { item -> (WindowItem, Int)? in
+        filteredWindows = allWindows
+            .compactMap { item -> (WindowItem, Int)? in
+                if !tokens.isEmpty {
                     guard tokens.allSatisfy({ item.searchableText.contains($0) }) else {
                         return nil
                     }
-                    return (item, score(item: item, tokens: tokens))
                 }
-                .sorted { lhs, rhs in
-                    if lhs.1 != rhs.1 {
-                        return lhs.1 > rhs.1
-                    }
-                    return lhs.0.order < rhs.0.order
+
+                return (item, score(item: item, tokens: tokens, query: query))
+            }
+            .sorted { lhs, rhs in
+                if lhs.1 != rhs.1 {
+                    return lhs.1 > rhs.1
                 }
-                .map(\.0)
-        }
+                return lhs.0.order < rhs.0.order
+            }
+            .map(\.0)
 
         tableView.reloadData()
         emptyLabel.isHidden = !filteredWindows.isEmpty || !AccessibilityPermission.isTrusted
@@ -301,7 +300,7 @@ final class SearchPanelController: NSObject {
         }
     }
 
-    private func score(item: WindowItem, tokens: [String]) -> Int {
+    private func score(item: WindowItem, tokens: [String], query: String) -> Int {
         let title = item.displayTitle.lowercased()
         let appName = item.appName.lowercased()
         var score = max(0, 1_000 - item.order)
@@ -324,6 +323,7 @@ final class SearchPanelController: NSObject {
             score -= 50
         }
 
+        score += WindowSelectionMemory.shared.score(for: item, query: query)
         return score
     }
 
@@ -355,6 +355,7 @@ final class SearchPanelController: NSObject {
         let item = filteredWindows[row]
         hide()
         let result = catalog.activate(item)
+        WindowSelectionMemory.shared.recordSelection(item, query: searchField.stringValue)
         if result != .success {
             NSSound.beep()
         }

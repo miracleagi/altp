@@ -10,6 +10,11 @@ struct KeyboardShortcut: Equatable {
         modifiers: UInt32(optionKey)
     )
 
+    static let defaultQuickSwitchShortcut = KeyboardShortcut(
+        keyCode: UInt32(kVK_Tab),
+        modifiers: UInt32(optionKey)
+    )
+
     var displayString: String {
         ShortcutFormatter.displayString(keyCode: keyCode, modifiers: modifiers)
     }
@@ -47,6 +52,17 @@ enum AppSettings {
     private enum Key {
         static let shortcutKeyCode = "shortcut.keyCode"
         static let shortcutModifiers = "shortcut.modifiers"
+        static let quickSwitchShortcutKeyCode = "quickSwitchShortcut.keyCode"
+        static let quickSwitchShortcutModifiers = "quickSwitchShortcut.modifiers"
+    }
+
+    static var searchShortcut: KeyboardShortcut {
+        get {
+            shortcut
+        }
+        set {
+            shortcut = newValue
+        }
     }
 
     static var shortcut: KeyboardShortcut {
@@ -70,6 +86,33 @@ enum AppSettings {
 
     static func resetShortcut() {
         shortcut = .defaultShortcut
+    }
+
+    static var quickSwitchShortcut: KeyboardShortcut {
+        get {
+            let defaults = UserDefaults.standard
+            guard defaults.object(forKey: Key.quickSwitchShortcutKeyCode) != nil else {
+                return .defaultQuickSwitchShortcut
+            }
+
+            return KeyboardShortcut(
+                keyCode: UInt32(defaults.integer(forKey: Key.quickSwitchShortcutKeyCode)),
+                modifiers: UInt32(defaults.integer(forKey: Key.quickSwitchShortcutModifiers))
+            )
+        }
+        set {
+            let defaults = UserDefaults.standard
+            defaults.set(Int(newValue.keyCode), forKey: Key.quickSwitchShortcutKeyCode)
+            defaults.set(Int(newValue.modifiers), forKey: Key.quickSwitchShortcutModifiers)
+        }
+    }
+
+    static func resetSearchShortcut() {
+        searchShortcut = .defaultShortcut
+    }
+
+    static func resetQuickSwitchShortcut() {
+        quickSwitchShortcut = .defaultQuickSwitchShortcut
     }
 }
 

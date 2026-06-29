@@ -5,19 +5,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let launchAtLoginArgument = "--launch-at-login"
     private let windowCatalog = WindowCatalog()
     private lazy var searchPanelController = SearchPanelController(catalog: windowCatalog)
-    private var hotKeyManager: HotKeyManager?
+    private var searchHotKeyManager: HotKeyManager?
+    private var quickSwitchHotKeyManager: HotKeyManager?
     private var preferencesController: PreferencesWindowController?
     private var statusItem: NSStatusItem?
-    private var hotKeyStatusMessage = ""
-    private var hotKeyStatusIsError = false
+    private var searchHotKeyStatusMessage = ""
+    private var searchHotKeyStatusIsError = false
+    private var quickSwitchHotKeyStatusMessage = ""
+    private var quickSwitchHotKeyStatusIsError = false
     private var suppressSearchPanelOnReopen = false
+    private var quickSwitchSessionKeys: [String] = []
+    private var quickSwitchSessionIndex = -1
+    private var lastQuickSwitchAt = Date.distantPast
+    private let quickSwitchSessionTimeout: TimeInterval = 1.2
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSLog("Altp did finish launching")
         LaunchAtLoginManager.migrateLegacyLaunchAgentIfNeeded()
         NSApp.setActivationPolicy(.accessory)
         setupStatusItem()
-        setupHotKey()
+        setupHotKeys()
         _ = AccessibilityPermission.requestIfNeeded()
 
         if !ProcessInfo.processInfo.arguments.contains(launchAtLoginArgument) {
@@ -42,13 +49,56 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         searchPanelController.toggle()
     }
 
+    @objc private func quickSwitchWindow() {
+        guard AccessibilityPermission.isTrusted else {
+            _ = AccessibilityPermission.requestIfNeeded()
+            NSSound.beep()
+            return
+        }
+
+        let windows = windowCatalog.allWindows()
+        guard !windows.isEmpty else {
+            NSSound.beep()
+            return
+        }
+
+        let now = Date()
+        let isContinuingSession = now.timeIntervalSince(lastQuickSwitchAt) <= quickSwitchSessionTimeout
+            && !quickSwitchSessionKeys.isEmpty
+        let orderedWindows = quickSwitchWindows(from: windows, isContinuingSession: isContinuingSession)
+        guard !orderedWindows.isEmpty else {
+            NSSound.beep()
+            return
+        }
+
+        let nextIndex: Int
+        if isContinuingSession {
+            let currentIndex = max(0, quickSwitchSessionIndex)
+            nextIndex = (currentIndex + 1) % orderedWindows.count
+        } else {
+            nextIndex = orderedWindows.count > 1 ? 1 : 0
+        }
+
+        let item = orderedWindows[nextIndex]
+        let result = windowCatalog.activate(item)
+        WindowSelectionMemory.shared.recordSelection(item, query: "")
+        quickSwitchSessionKeys = orderedWindows.map(\.quickSwitchKey)
+        quickSwitchSessionIndex = nextIndex
+        lastQuickSwitchAt = now
+
+        if result != .success {
+            NSSound.beep()
+        }
+    }
+
     @objc private func showPreferences() {
         suppressSearchPanelOnReopen = true
         searchPanelController.hide()
 
         let controller = preferencesController ?? makePreferencesController()
         preferencesController = controller
-        controller.updateHotKeyStatus(hotKeyStatusMessage, isError: hotKeyStatusIsError)
+        controller.updateSearchHotKeyStatus(searchHotKeyStatusMessage, isError: searchHotKeyStatusIsError)
+        controller.updateQuickSwitchHotKeyStatus(quickSwitchHotKeyStatusMessage, isError: quickSwitchHotKeyStatusIsError)
         controller.refresh()
         controller.showWindow(nil)
 
@@ -70,12 +120,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.terminate(nil)
     }
 
-    private func setupHotKey() {
-        hotKeyManager = nil
-        let shortcut = AppSettings.shortcut
+    private func setupHotKeys() {
+        searchHotKeyManager = nil
+        quickSwitchHotKeyManager = nil
+        setupSearchHotKey()
+        setupQuickSwitchHotKey()
+        statusItem?.button?.toolTip = """
+        Altp
+        Search: \(AppSettings.searchShortcut.displayString)
+        Quick Switch: \(AppSettings.quickSwitchShortcut.displayString)
+        """
+    }
+
+    private func setupSearchHotKey() {
+        let shortcut = AppSettings.searchShortcut
 
         do {
-            hotKeyManager = try HotKeyManager(
+            searchHotKeyManager = try HotKeyManager(
+                id: 1,
                 keyCode: shortcut.keyCode,
                 modifiers: shortcut.modifiers,
                 action: { [weak self] in
@@ -84,12 +146,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     }
                 }
             )
-            setHotKeyStatus("Registered \(shortcut.displayString)", isError: false)
-            statusItem?.button?.toolTip = "Altp Window Search - \(shortcut.displayString)"
-            NSLog("Altp registered \(shortcut.displayString) hotkey")
+            setSearchHotKeyStatus("Registered \(shortcut.displayString)", isError: false)
+            NSLog("Altp registered search hotkey \(shortcut.displayString)")
         } catch {
-            setHotKeyStatus("Could not register \(shortcut.displayString): \(error)", isError: true)
-            NSLog("Altp hotkey registration failed: \(error)")
+            setSearchHotKeyStatus("Could not register \(shortcut.displayString): \(error)", isError: true)
+            NSLog("Altp search hotkey registration failed: \(error)")
+        }
+    }
+
+    private func setupQuickSwitchHotKey() {
+        let shortcut = AppSettings.quickSwitchShortcut
+
+        do {
+            quickSwitchHotKeyManager = try HotKeyManager(
+                id: 2,
+                keyCode: shortcut.keyCode,
+                modifiers: shortcut.modifiers,
+                action: { [weak self] in
+                    DispatchQueue.main.async {
+                        self?.quickSwitchWindow()
+                    }
+                }
+            )
+            setQuickSwitchHotKeyStatus("Registered \(shortcut.displayString)", isError: false)
+            NSLog("Altp registered quick switch hotkey \(shortcut.displayString)")
+        } catch {
+            setQuickSwitchHotKeyStatus("Could not register \(shortcut.displayString): \(error)", isError: true)
+            NSLog("Altp quick switch hotkey registration failed: \(error)")
         }
     }
 
@@ -104,6 +187,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(menuItem(
             title: "Show Window Search",
             action: #selector(showSearchPanel),
+            keyEquivalent: ""
+        ))
+        menu.addItem(menuItem(
+            title: "Quick Switch to Previous Window",
+            action: #selector(quickSwitchWindow),
             keyEquivalent: ""
         ))
         menu.addItem(menuItem(
@@ -142,20 +230,46 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func makePreferencesController() -> PreferencesWindowController {
         let controller = PreferencesWindowController()
         controller.onShortcutChanged = { [weak self] in
-            self?.setupHotKey()
+            self?.setupHotKeys()
         }
         return controller
     }
 
-    private func setHotKeyStatus(_ message: String, isError: Bool) {
-        hotKeyStatusMessage = message
-        hotKeyStatusIsError = isError
-        preferencesController?.updateHotKeyStatus(message, isError: isError)
+    private func setSearchHotKeyStatus(_ message: String, isError: Bool) {
+        searchHotKeyStatusMessage = message
+        searchHotKeyStatusIsError = isError
+        preferencesController?.updateSearchHotKeyStatus(message, isError: isError)
+    }
+
+    private func setQuickSwitchHotKeyStatus(_ message: String, isError: Bool) {
+        quickSwitchHotKeyStatusMessage = message
+        quickSwitchHotKeyStatusIsError = isError
+        preferencesController?.updateQuickSwitchHotKeyStatus(message, isError: isError)
     }
 
     private func showSearchPanelAfterCurrentEvent() {
         DispatchQueue.main.async { [weak self] in
             self?.searchPanelController.show()
         }
+    }
+
+    private func quickSwitchWindows(
+        from windows: [WindowItem],
+        isContinuingSession: Bool
+    ) -> [WindowItem] {
+        guard isContinuingSession else {
+            return windows
+        }
+
+        var windowsByKey: [String: WindowItem] = [:]
+        for window in windows where windowsByKey[window.quickSwitchKey] == nil {
+            windowsByKey[window.quickSwitchKey] = window
+        }
+
+        var orderedWindows = quickSwitchSessionKeys.compactMap { windowsByKey[$0] }
+        let usedKeys = Set(orderedWindows.map(\.quickSwitchKey))
+        orderedWindows.append(contentsOf: windows.filter { !usedKeys.contains($0.quickSwitchKey) })
+
+        return orderedWindows.isEmpty ? windows : orderedWindows
     }
 }
