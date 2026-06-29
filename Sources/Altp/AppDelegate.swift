@@ -102,7 +102,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             keyEquivalent: ""
         ))
         menu.addItem(menuItem(
-            title: "Preferences...",
+            title: "Settings...",
             action: #selector(showPreferences),
             keyEquivalent: ","
         ))

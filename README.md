@@ -9,9 +9,9 @@ Altp 是一个 macOS 窗口切换器原型：用 `Option + Space` 唤起类似 S
 - 方向键选择，回车切换，Esc 关闭。
 - 支持最小化窗口恢复后切换。
 - 菜单栏常驻，默认不占用 Dock。
-- Preferences 窗口支持配置快捷键、开机启动和查看辅助权限状态。
+- Settings 窗口支持配置快捷键、开机启动和查看辅助权限状态。
 
-Altp 是菜单栏 App，打开后不会出现在 Dock。启动成功后可以在菜单栏看到 `Altp`，也可以按 `Option + Space` 唤起搜索框。菜单栏里的 `Preferences...` 可以配置快捷键、开机启动和辅助权限。重复双击 `Altp.app` 会重新弹出搜索框。
+Altp 是菜单栏 App，打开后不会出现在 Dock。启动成功后可以在菜单栏看到 `Altp`，也可以按 `Option + Space` 唤起搜索框。菜单栏里的 `Settings...` 可以配置快捷键、开机启动和辅助权限。重复双击 `Altp.app` 会重新弹出搜索框。
 
 如果要开启 `Launch at Login`，先把 `Altp.app` 移到 `/Applications` 后再打开；从 `Downloads` 或开发目录直接运行时，macOS 可能不会允许注册登录项。如果 macOS 无法把主 App 注册成登录项，Altp 会退回到用户级 LaunchAgent。
 
