@@ -54,6 +54,7 @@ enum AppSettings {
         static let shortcutModifiers = "shortcut.modifiers"
         static let quickSwitchShortcutKeyCode = "quickSwitchShortcut.keyCode"
         static let quickSwitchShortcutModifiers = "quickSwitchShortcut.modifiers"
+        static let showMinimizedWindows = "windowFilters.showMinimizedWindows"
     }
 
     static var searchShortcut: KeyboardShortcut {
@@ -113,6 +114,20 @@ enum AppSettings {
 
     static func resetQuickSwitchShortcut() {
         quickSwitchShortcut = .defaultQuickSwitchShortcut
+    }
+
+    static var showMinimizedWindows: Bool {
+        get {
+            let defaults = UserDefaults.standard
+            guard defaults.object(forKey: Key.showMinimizedWindows) != nil else {
+                return true
+            }
+
+            return defaults.bool(forKey: Key.showMinimizedWindows)
+        }
+        set {
+            UserDefaults.standard.set(newValue, forKey: Key.showMinimizedWindows)
+        }
     }
 }
 

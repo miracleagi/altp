@@ -94,6 +94,7 @@ final class WindowCatalog {
             return []
         }
 
+        let showMinimizedWindows = AppSettings.showMinimizedWindows
         let visibleOrder = WindowOrdering.snapshot()
         let currentPID = ProcessInfo.processInfo.processIdentifier
         let apps = NSWorkspace.shared.runningApplications
@@ -120,9 +121,19 @@ final class WindowCatalog {
                 let subrole = axString(window, kAXSubroleAttribute as CFString) ?? ""
                 let title = axString(window, kAXTitleAttribute as CFString) ?? ""
                 let frame = axFrame(window)
+                let isMinimized = axBool(window, kAXMinimizedAttribute as CFString) ?? false
+                let isHidden = app.isHidden
 
                 if title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                    frame?.isEmpty != false {
+                    continue
+                }
+
+                if isHidden {
+                    continue
+                }
+
+                if isMinimized && !showMinimizedWindows {
                     continue
                 }
 
@@ -136,8 +147,8 @@ final class WindowCatalog {
                     title: title,
                     appName: appName,
                     bundleIdentifier: app.bundleIdentifier,
-                    isMinimized: axBool(window, kAXMinimizedAttribute as CFString) ?? false,
-                    isHidden: app.isHidden,
+                    isMinimized: isMinimized,
+                    isHidden: isHidden,
                     role: role,
                     subrole: subrole,
                     frame: frame,

@@ -22,6 +22,7 @@ final class PreferencesWindowController: NSWindowController {
     private let searchHotKeyStatusLabel = NSTextField(labelWithString: "")
     private let quickSwitchShortcutButton = ShortcutRecorderButton(shortcut: AppSettings.quickSwitchShortcut)
     private let quickSwitchHotKeyStatusLabel = NSTextField(labelWithString: "")
+    private let minimizedWindowsSwitch = NSSwitch()
 
     private let launchAtLoginSwitch = NSSwitch()
     private let launchStatusLabel = NSTextField(labelWithString: "")
@@ -77,6 +78,7 @@ final class PreferencesWindowController: NSWindowController {
     func refresh() {
         searchShortcutButton.shortcut = AppSettings.searchShortcut
         quickSwitchShortcutButton.shortcut = AppSettings.quickSwitchShortcut
+        minimizedWindowsSwitch.state = AppSettings.showMinimizedWindows ? .on : .off
         refreshLaunchAtLoginStatus()
         refreshAccessibilityStatus()
     }
@@ -162,6 +164,19 @@ final class PreferencesWindowController: NSWindowController {
                 detail: "Show a selectable switcher for recent windows.",
                 control: quickSwitchControls,
                 statusLabel: quickSwitchHotKeyStatusLabel
+            )
+        ]))
+
+        minimizedWindowsSwitch.target = self
+        minimizedWindowsSwitch.action = #selector(toggleMinimizedWindows)
+        minimizedWindowsSwitch.setContentHuggingPriority(.required, for: .horizontal)
+
+        rootStack.addArrangedSubview(settingGroup(rows: [
+            settingRow(
+                title: "Show Minimized Windows",
+                detail: "Hidden app windows are always excluded. Turn this off to hide minimized windows too.",
+                control: minimizedWindowsSwitch,
+                statusLabel: nil
             )
         ]))
 
@@ -439,6 +454,10 @@ final class PreferencesWindowController: NSWindowController {
             launchStatusLabel.stringValue = "Could not update: \(error.localizedDescription)"
             launchStatusLabel.textColor = .systemRed
         }
+    }
+
+    @objc private func toggleMinimizedWindows() {
+        AppSettings.showMinimizedWindows = minimizedWindowsSwitch.state == .on
     }
 
     @objc private func openLoginItemsSettings() {
