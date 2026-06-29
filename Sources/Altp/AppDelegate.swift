@@ -9,6 +9,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
     private var hotKeyStatusMessage = ""
     private var hotKeyStatusIsError = false
+    private var suppressSearchPanelOnReopen = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSLog("Altp did finish launching")
@@ -20,6 +21,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if suppressSearchPanelOnReopen || preferencesController?.window?.isVisible == true {
+            return true
+        }
+
         showSearchPanelAfterCurrentEvent()
         return true
     }
@@ -33,11 +38,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func showPreferences() {
+        suppressSearchPanelOnReopen = true
+        searchPanelController.hide()
+
         let controller = preferencesController ?? makePreferencesController()
         preferencesController = controller
         controller.updateHotKeyStatus(hotKeyStatusMessage, isError: hotKeyStatusIsError)
         controller.refresh()
         controller.showWindow(nil)
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+            self?.suppressSearchPanelOnReopen = false
+        }
     }
 
     @objc private func requestAccessibilityPermission() {
