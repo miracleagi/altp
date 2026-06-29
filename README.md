@@ -1,6 +1,6 @@
 # Altp
 
-Altp 是一个 macOS 窗口切换器原型：用 `Option + Space` 唤起类似 Spotlight 的搜索框，输入 App 名称或窗口标题后按回车切换到对应窗口；也可以用 `Option + Tab` 快速切回上一个窗口。
+Altp 是一个 macOS 窗口切换器原型：用 `Option + Space` 唤起类似 Spotlight 的搜索框，输入 App 名称或窗口标题后按回车切换到对应窗口；也可以用 `Option + Tab` 打开快速切换器并选择窗口。
 
 ## 功能
 
@@ -8,12 +8,12 @@ Altp 是一个 macOS 窗口切换器原型：用 `Option + Space` 唤起类似 S
 - 搜索窗口标题、App 名称和 bundle identifier。
 - 搜索结果会记住你常选的窗口，后续相同或相近搜索会优先展示。
 - 方向键选择，回车切换，Esc 关闭。
-- `Option + Tab` 快速切换到上一个窗口，连续按会在最近窗口中循环。
+- `Option + Tab` 打开快速切换器，连续按会移动选择，松开 Option 或按回车切换。
 - 支持最小化窗口恢复后切换。
 - 菜单栏常驻，默认不占用 Dock。
 - Settings 窗口支持配置搜索快捷键、快速切换快捷键、开机启动和查看辅助权限状态。
 
-Altp 是菜单栏 App，打开后不会出现在 Dock。启动成功后可以在菜单栏看到 `Altp`，也可以按 `Option + Space` 唤起搜索框，按 `Option + Tab` 快速切换窗口。菜单栏里的 `Settings...` 可以配置快捷键、开机启动和辅助权限。重复双击 `Altp.app` 会重新弹出搜索框。
+Altp 是菜单栏 App，打开后不会出现在 Dock。启动成功后可以在菜单栏看到 `Altp`，也可以按 `Option + Space` 唤起搜索框，按 `Option + Tab` 打开快速切换器。菜单栏里的 `Settings...` 可以配置快捷键、开机启动和辅助权限。重复双击 `Altp.app` 会重新弹出搜索框。
 
 如果要开启 `Launch at Login`，先把 `Altp.app` 移到 `/Applications` 后再打开；从 `Downloads` 或开发目录直接运行时，macOS 可能不会允许注册登录项。Altp 使用内嵌的 Login Helper 注册开机启动，因此开启后会出现在 System Settings -> General -> Login Items & Extensions。
 

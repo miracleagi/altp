@@ -159,7 +159,7 @@ final class PreferencesWindowController: NSWindowController {
             ),
             settingRow(
                 title: "Quick Switch Shortcut",
-                detail: "Switch to the previous window, then cycle through recent windows.",
+                detail: "Show a selectable switcher for recent windows.",
                 control: quickSwitchControls,
                 statusLabel: quickSwitchHotKeyStatusLabel
             )

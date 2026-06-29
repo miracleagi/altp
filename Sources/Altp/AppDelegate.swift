@@ -5,6 +5,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let launchAtLoginArgument = "--launch-at-login"
     private let windowCatalog = WindowCatalog()
     private lazy var searchPanelController = SearchPanelController(catalog: windowCatalog)
+    private var quickSwitchPanelController: QuickSwitchPanelController?
     private var searchHotKeyManager: HotKeyManager?
     private var quickSwitchHotKeyManager: HotKeyManager?
     private var preferencesController: PreferencesWindowController?
@@ -14,10 +15,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var quickSwitchHotKeyStatusMessage = ""
     private var quickSwitchHotKeyStatusIsError = false
     private var suppressSearchPanelOnReopen = false
-    private var quickSwitchSessionKeys: [String] = []
-    private var quickSwitchSessionIndex = -1
-    private var lastQuickSwitchAt = Date.distantPast
-    private let quickSwitchSessionTimeout: TimeInterval = 1.2
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSLog("Altp did finish launching")
@@ -46,54 +43,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func toggleSearchPanel() {
+        quickSwitchPanelController?.hide()
         searchPanelController.toggle()
     }
 
     @objc private func quickSwitchWindow() {
-        guard AccessibilityPermission.isTrusted else {
-            _ = AccessibilityPermission.requestIfNeeded()
-            NSSound.beep()
-            return
-        }
-
-        let windows = windowCatalog.allWindows()
-        guard !windows.isEmpty else {
-            NSSound.beep()
-            return
-        }
-
-        let now = Date()
-        let isContinuingSession = now.timeIntervalSince(lastQuickSwitchAt) <= quickSwitchSessionTimeout
-            && !quickSwitchSessionKeys.isEmpty
-        let orderedWindows = quickSwitchWindows(from: windows, isContinuingSession: isContinuingSession)
-        guard !orderedWindows.isEmpty else {
-            NSSound.beep()
-            return
-        }
-
-        let nextIndex: Int
-        if isContinuingSession {
-            let currentIndex = max(0, quickSwitchSessionIndex)
-            nextIndex = (currentIndex + 1) % orderedWindows.count
-        } else {
-            nextIndex = orderedWindows.count > 1 ? 1 : 0
-        }
-
-        let item = orderedWindows[nextIndex]
-        let result = windowCatalog.activate(item)
-        WindowSelectionMemory.shared.recordSelection(item, query: "")
-        quickSwitchSessionKeys = orderedWindows.map(\.quickSwitchKey)
-        quickSwitchSessionIndex = nextIndex
-        lastQuickSwitchAt = now
-
-        if result != .success {
-            NSSound.beep()
-        }
+        searchPanelController.hide()
+        quickSwitchController().showOrAdvance()
     }
 
     @objc private func showPreferences() {
         suppressSearchPanelOnReopen = true
         searchPanelController.hide()
+        quickSwitchPanelController?.hide()
 
         let controller = preferencesController ?? makePreferencesController()
         preferencesController = controller
@@ -249,27 +211,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func showSearchPanelAfterCurrentEvent() {
         DispatchQueue.main.async { [weak self] in
+            self?.quickSwitchPanelController?.hide()
             self?.searchPanelController.show()
         }
     }
 
-    private func quickSwitchWindows(
-        from windows: [WindowItem],
-        isContinuingSession: Bool
-    ) -> [WindowItem] {
-        guard isContinuingSession else {
-            return windows
+    private func quickSwitchController() -> QuickSwitchPanelController {
+        if let quickSwitchPanelController {
+            return quickSwitchPanelController
         }
 
-        var windowsByKey: [String: WindowItem] = [:]
-        for window in windows where windowsByKey[window.quickSwitchKey] == nil {
-            windowsByKey[window.quickSwitchKey] = window
-        }
-
-        var orderedWindows = quickSwitchSessionKeys.compactMap { windowsByKey[$0] }
-        let usedKeys = Set(orderedWindows.map(\.quickSwitchKey))
-        orderedWindows.append(contentsOf: windows.filter { !usedKeys.contains($0.quickSwitchKey) })
-
-        return orderedWindows.isEmpty ? windows : orderedWindows
+        let controller = QuickSwitchPanelController(catalog: windowCatalog)
+        quickSwitchPanelController = controller
+        return controller
     }
 }

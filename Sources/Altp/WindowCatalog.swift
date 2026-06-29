@@ -86,16 +86,6 @@ final class WindowItem: NSObject {
         .joined(separator: "|")
     }
 
-    var quickSwitchKey: String {
-        let frameKey: String
-        if let frame {
-            frameKey = "\(Int(frame.origin.x)),\(Int(frame.origin.y)),\(Int(frame.width)),\(Int(frame.height))"
-        } else {
-            frameKey = "no-frame"
-        }
-
-        return "\(app.processIdentifier)|\(memoryKey)|\(frameKey)"
-    }
 }
 
 final class WindowCatalog {
