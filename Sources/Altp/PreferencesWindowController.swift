@@ -186,18 +186,21 @@ final class PreferencesWindowController: NSWindowController {
         case .enabled:
             launchAtLoginCheckbox.state = .on
             launchStatusLabel.textColor = .secondaryLabelColor
+        case .enabledViaLaunchAgent:
+            launchAtLoginCheckbox.state = .on
+            launchStatusLabel.textColor = .secondaryLabelColor
         case .notRegistered:
             launchAtLoginCheckbox.state = .off
             launchStatusLabel.textColor = .secondaryLabelColor
         case .requiresApproval:
             launchAtLoginCheckbox.state = .mixed
             launchStatusLabel.textColor = .systemOrange
-        case .notFound:
+        case .staleLaunchAgent:
+            launchAtLoginCheckbox.state = .mixed
+            launchStatusLabel.textColor = .systemOrange
+        case .unavailable:
             launchAtLoginCheckbox.state = .off
             launchStatusLabel.textColor = .systemRed
-        @unknown default:
-            launchAtLoginCheckbox.state = .off
-            launchStatusLabel.textColor = .systemOrange
         }
 
         launchStatusLabel.stringValue = LaunchAtLoginManager.statusText
