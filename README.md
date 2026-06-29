@@ -101,7 +101,7 @@ build -> Developer ID signing with Hardened Runtime -> zip -> notarization -> st
 最终产物：
 
 ```text
-dist/release/Altp-0.1.1-macOS.zip
+dist/release/Altp-0.1.2-macOS.zip
 ```
 
 发布前可以验证 Gatekeeper 是否接受：
