@@ -36,6 +36,18 @@ open dist/Altp.app
 com.miracleagi.altp
 ```
 
+App 图标文件在：
+
+```text
+assets/AppIcon.icns
+```
+
+如果需要重新生成图标：
+
+```bash
+swift scripts/generate_icon.swift
+```
+
 本地开发构建会优先使用 `Apple Development` 证书签名；如果没有可用证书，脚本会失败，避免退回 ad-hoc 签名导致辅助功能权限在每次 rebuild 后失效。临时测试可以显式允许 ad-hoc：
 
 ```bash
