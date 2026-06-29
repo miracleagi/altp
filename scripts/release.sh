@@ -3,8 +3,8 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APP_NAME="Altp"
-APP_VERSION="${ALTP_VERSION:-0.1.2}"
-APP_BUILD="${ALTP_BUILD:-3}"
+APP_VERSION="${ALTP_VERSION:-0.1.3}"
+APP_BUILD="${ALTP_BUILD:-4}"
 BUNDLE_ID="${ALTP_BUNDLE_ID:-com.miracleagi.altp}"
 DIST_DIR="$ROOT_DIR/dist"
 APP_DIR="$DIST_DIR/$APP_NAME.app"
