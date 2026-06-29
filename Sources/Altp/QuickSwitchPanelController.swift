@@ -50,7 +50,7 @@ final class QuickSwitchPanelController: NSObject {
             return
         }
 
-        windows = catalog.allWindows()
+        windows = rankedWindows(catalog.allWindows())
         tableView.reloadData()
         emptyLabel.isHidden = !windows.isEmpty
 
@@ -188,6 +188,37 @@ final class QuickSwitchPanelController: NSObject {
         return NSScreen.screens.first { screen in
             screen.frame.contains(mouseLocation)
         }
+    }
+
+    private func rankedWindows(_ items: [WindowItem]) -> [WindowItem] {
+        guard items.count > 2 else {
+            return items
+        }
+
+        let currentWindow = items[0]
+        let candidates = items.dropFirst().sorted { lhs, rhs in
+            let lhsScore = score(item: lhs)
+            let rhsScore = score(item: rhs)
+
+            if lhsScore != rhsScore {
+                return lhsScore > rhsScore
+            }
+
+            return lhs.order < rhs.order
+        }
+
+        return [currentWindow] + candidates
+    }
+
+    private func score(item: WindowItem) -> Int {
+        var score = max(0, 1_000 - item.order)
+
+        if item.isMinimized {
+            score -= 50
+        }
+
+        score += WindowSelectionMemory.shared.score(for: item, query: "")
+        return score
     }
 
     private func moveSelection(delta: Int) {
