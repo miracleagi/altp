@@ -95,6 +95,7 @@ final class WindowCatalog {
         }
 
         let showMinimizedWindows = AppSettings.showMinimizedWindows
+        let excludedTitlePatterns = AppSettings.excludedWindowTitlePatterns.map(normalizedIdentityPart)
         let visibleOrder = WindowOrdering.snapshot()
         let currentPID = ProcessInfo.processInfo.processIdentifier
         let apps = NSWorkspace.shared.runningApplications
@@ -134,6 +135,10 @@ final class WindowCatalog {
                 }
 
                 if isMinimized && !showMinimizedWindows {
+                    continue
+                }
+
+                if isExcludedWindowTitle(title, excludedTitlePatterns: excludedTitlePatterns) {
                     continue
                 }
 
@@ -302,4 +307,18 @@ private func normalizedIdentityPart(_ value: String) -> String {
         .lowercased()
         .split(separator: " ")
         .joined(separator: " ")
+}
+
+private func isExcludedWindowTitle(
+    _ title: String,
+    excludedTitlePatterns: [String]
+) -> Bool {
+    let normalizedTitle = normalizedIdentityPart(title)
+    guard !normalizedTitle.isEmpty else {
+        return false
+    }
+
+    return excludedTitlePatterns.contains { pattern in
+        !pattern.isEmpty && normalizedTitle.contains(pattern)
+    }
 }

@@ -7,7 +7,7 @@ Altp 是一个 macOS 窗口切换器原型：用 `Option + Space` 唤起类似 S
 - 枚举当前运行 App 的窗口，而不是只切换 App。
 - 搜索窗口标题、App 名称和 bundle identifier。
 - 搜索结果会记住你常选的窗口，后续相同或相近搜索会优先展示。
-- 默认过滤隐藏 App 的窗口，Settings 里可以选择是否显示最小化窗口。
+- 默认过滤隐藏 App 的窗口和内部窗口标题（例如 WatermarkWidget），Settings 里可以编辑排除标题规则并选择是否显示最小化窗口。
 - 方向键选择，回车切换，Esc 关闭。
 - `Option + Tab` 打开快速切换器，连续按会移动选择，松开 Option 或按回车切换。
 - 支持最小化窗口恢复后切换。

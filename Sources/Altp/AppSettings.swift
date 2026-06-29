@@ -49,12 +49,17 @@ struct KeyboardShortcut: Equatable {
 }
 
 enum AppSettings {
+    static let defaultExcludedWindowTitlePatterns = [
+        "WatermarkWidget"
+    ]
+
     private enum Key {
         static let shortcutKeyCode = "shortcut.keyCode"
         static let shortcutModifiers = "shortcut.modifiers"
         static let quickSwitchShortcutKeyCode = "quickSwitchShortcut.keyCode"
         static let quickSwitchShortcutModifiers = "quickSwitchShortcut.modifiers"
         static let showMinimizedWindows = "windowFilters.showMinimizedWindows"
+        static let excludedWindowTitlePatterns = "windowFilters.excludedWindowTitlePatterns"
     }
 
     static var searchShortcut: KeyboardShortcut {
@@ -128,6 +133,53 @@ enum AppSettings {
         set {
             UserDefaults.standard.set(newValue, forKey: Key.showMinimizedWindows)
         }
+    }
+
+    static var excludedWindowTitlePatterns: [String] {
+        get {
+            let defaults = UserDefaults.standard
+            guard defaults.object(forKey: Key.excludedWindowTitlePatterns) != nil else {
+                return defaultExcludedWindowTitlePatterns
+            }
+
+            return sanitizeWindowTitlePatterns(defaults.stringArray(forKey: Key.excludedWindowTitlePatterns) ?? [])
+        }
+        set {
+            UserDefaults.standard.set(
+                sanitizeWindowTitlePatterns(newValue),
+                forKey: Key.excludedWindowTitlePatterns
+            )
+        }
+    }
+
+    static func resetExcludedWindowTitlePatterns() {
+        excludedWindowTitlePatterns = defaultExcludedWindowTitlePatterns
+    }
+
+    static func sanitizeWindowTitlePatterns(_ patterns: [String]) -> [String] {
+        var seen = Set<String>()
+        var sanitized: [String] = []
+
+        for pattern in patterns {
+            let normalized = pattern
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .split(separator: " ")
+                .joined(separator: " ")
+
+            guard !normalized.isEmpty else {
+                continue
+            }
+
+            let key = normalized.lowercased()
+            guard !seen.contains(key) else {
+                continue
+            }
+
+            seen.insert(key)
+            sanitized.append(normalized)
+        }
+
+        return sanitized
     }
 }
 

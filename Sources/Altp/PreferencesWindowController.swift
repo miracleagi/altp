@@ -23,6 +23,8 @@ final class PreferencesWindowController: NSWindowController {
     private let quickSwitchShortcutButton = ShortcutRecorderButton(shortcut: AppSettings.quickSwitchShortcut)
     private let quickSwitchHotKeyStatusLabel = NSTextField(labelWithString: "")
     private let minimizedWindowsSwitch = NSSwitch()
+    private let excludedTitleTokenField = NSTokenField()
+    private let excludedTitleStatusLabel = NSTextField(labelWithString: "")
 
     private let launchAtLoginSwitch = NSSwitch()
     private let launchStatusLabel = NSTextField(labelWithString: "")
@@ -35,7 +37,7 @@ final class PreferencesWindowController: NSWindowController {
 
     init() {
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 620, height: 430),
+            contentRect: NSRect(x: 0, y: 0, width: 620, height: 540),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
@@ -79,6 +81,7 @@ final class PreferencesWindowController: NSWindowController {
         searchShortcutButton.shortcut = AppSettings.searchShortcut
         quickSwitchShortcutButton.shortcut = AppSettings.quickSwitchShortcut
         minimizedWindowsSwitch.state = AppSettings.showMinimizedWindows ? .on : .off
+        refreshExcludedTitleRules()
         refreshLaunchAtLoginStatus()
         refreshAccessibilityStatus()
     }
@@ -171,12 +174,25 @@ final class PreferencesWindowController: NSWindowController {
         minimizedWindowsSwitch.action = #selector(toggleMinimizedWindows)
         minimizedWindowsSwitch.setContentHuggingPriority(.required, for: .horizontal)
 
+        configureExcludedTitleTokenField()
+        let resetExcludedTitlesButton = secondaryButton(
+            title: "Reset",
+            action: #selector(resetExcludedWindowTitles)
+        )
+        let excludedTitleControls = horizontalStack([excludedTitleTokenField, resetExcludedTitlesButton], spacing: 8)
+
         rootStack.addArrangedSubview(settingGroup(rows: [
             settingRow(
                 title: "Show Minimized Windows",
                 detail: "Hidden app windows are always excluded. Turn this off to hide minimized windows too.",
                 control: minimizedWindowsSwitch,
                 statusLabel: nil
+            ),
+            settingRow(
+                title: "Exclude Window Titles",
+                detail: "Hide internal windows whose title contains any token.",
+                control: excludedTitleControls,
+                statusLabel: excludedTitleStatusLabel
             )
         ]))
 
@@ -416,6 +432,33 @@ final class PreferencesWindowController: NSWindowController {
         }
     }
 
+    private func configureExcludedTitleTokenField() {
+        excludedTitleTokenField.tokenizingCharacterSet = CharacterSet(charactersIn: ",\n")
+        excludedTitleTokenField.placeholderString = "Window title"
+        excludedTitleTokenField.controlSize = .regular
+        excludedTitleTokenField.font = .systemFont(ofSize: 13)
+        excludedTitleTokenField.delegate = self
+        excludedTitleTokenField.target = self
+        excludedTitleTokenField.action = #selector(updateExcludedWindowTitles)
+        excludedTitleTokenField.translatesAutoresizingMaskIntoConstraints = false
+        excludedTitleTokenField.widthAnchor.constraint(equalToConstant: 286).isActive = true
+    }
+
+    private func refreshExcludedTitleRules() {
+        let patterns = AppSettings.excludedWindowTitlePatterns
+        excludedTitleTokenField.stringValue = patterns.joined(separator: ", ")
+        excludedTitleStatusLabel.stringValue = patterns.isEmpty
+            ? "No title rules"
+            : "\(patterns.count) title rule\(patterns.count == 1 ? "" : "s")"
+        excludedTitleStatusLabel.textColor = .secondaryLabelColor
+    }
+
+    private func excludedWindowTitleTokens() -> [String] {
+        AppSettings.sanitizeWindowTitlePatterns(
+            excludedTitleTokenField.stringValue.components(separatedBy: CharacterSet(charactersIn: ",\n"))
+        )
+    }
+
     @objc private func selectToolbarItem(_ sender: NSToolbarItem) {
         if sender.itemIdentifier == ToolbarID.general {
             selectPane(.general)
@@ -458,6 +501,16 @@ final class PreferencesWindowController: NSWindowController {
 
     @objc private func toggleMinimizedWindows() {
         AppSettings.showMinimizedWindows = minimizedWindowsSwitch.state == .on
+    }
+
+    @objc private func updateExcludedWindowTitles() {
+        AppSettings.excludedWindowTitlePatterns = excludedWindowTitleTokens()
+        refreshExcludedTitleRules()
+    }
+
+    @objc private func resetExcludedWindowTitles() {
+        AppSettings.resetExcludedWindowTitlePatterns()
+        refreshExcludedTitleRules()
     }
 
     @objc private func openLoginItemsSettings() {
@@ -519,5 +572,16 @@ extension PreferencesWindowController: NSToolbarDelegate {
 extension PreferencesWindowController: NSWindowDelegate {
     func windowDidBecomeKey(_ notification: Notification) {
         refresh()
+    }
+}
+
+extension PreferencesWindowController: NSTokenFieldDelegate {
+    func controlTextDidEndEditing(_ obj: Notification) {
+        guard let tokenField = obj.object as? NSTokenField,
+              tokenField === excludedTitleTokenField else {
+            return
+        }
+
+        updateExcludedWindowTitles()
     }
 }
