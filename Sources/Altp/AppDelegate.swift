@@ -5,7 +5,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let windowCatalog = WindowCatalog()
     private lazy var searchPanelController = SearchPanelController(catalog: windowCatalog)
     private var hotKeyManager: HotKeyManager?
+    private var preferencesController: PreferencesWindowController?
     private var statusItem: NSStatusItem?
+    private var hotKeyStatusMessage = ""
+    private var hotKeyStatusIsError = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSLog("Altp did finish launching")
@@ -29,6 +32,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         searchPanelController.toggle()
     }
 
+    @objc private func showPreferences() {
+        let controller = preferencesController ?? makePreferencesController()
+        preferencesController = controller
+        controller.updateHotKeyStatus(hotKeyStatusMessage, isError: hotKeyStatusIsError)
+        controller.refresh()
+        controller.showWindow(nil)
+    }
+
     @objc private func requestAccessibilityPermission() {
         _ = AccessibilityPermission.requestIfNeeded()
         searchPanelController.reloadWindowList()
@@ -43,18 +54,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func setupHotKey() {
+        hotKeyManager = nil
+        let shortcut = AppSettings.shortcut
+
         do {
             hotKeyManager = try HotKeyManager(
-                keyCode: UInt32(kVK_Space),
-                modifiers: UInt32(optionKey),
+                keyCode: shortcut.keyCode,
+                modifiers: shortcut.modifiers,
                 action: { [weak self] in
                     DispatchQueue.main.async {
                         self?.toggleSearchPanel()
                     }
                 }
             )
-            NSLog("Altp registered Option-Space hotkey")
+            setHotKeyStatus("Registered \(shortcut.displayString)", isError: false)
+            statusItem?.button?.toolTip = "Altp Window Search - \(shortcut.displayString)"
+            NSLog("Altp registered \(shortcut.displayString) hotkey")
         } catch {
+            setHotKeyStatus("Could not register \(shortcut.displayString): \(error)", isError: true)
             NSLog("Altp hotkey registration failed: \(error)")
         }
     }
@@ -72,6 +89,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             action: #selector(showSearchPanel),
             keyEquivalent: ""
         ))
+        menu.addItem(menuItem(
+            title: "Preferences...",
+            action: #selector(showPreferences),
+            keyEquivalent: ","
+        ))
+        menu.addItem(.separator())
         menu.addItem(menuItem(
             title: "Request Accessibility Permission",
             action: #selector(requestAccessibilityPermission),
@@ -97,6 +120,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let item = NSMenuItem(title: title, action: action, keyEquivalent: keyEquivalent)
         item.target = self
         return item
+    }
+
+    private func makePreferencesController() -> PreferencesWindowController {
+        let controller = PreferencesWindowController()
+        controller.onShortcutChanged = { [weak self] in
+            self?.setupHotKey()
+        }
+        return controller
+    }
+
+    private func setHotKeyStatus(_ message: String, isError: Bool) {
+        hotKeyStatusMessage = message
+        hotKeyStatusIsError = isError
+        preferencesController?.updateHotKeyStatus(message, isError: isError)
     }
 
     private func showSearchPanelAfterCurrentEvent() {

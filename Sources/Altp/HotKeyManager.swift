@@ -66,6 +66,9 @@ final class HotKeyManager {
         )
 
         guard hotKeyStatus == noErr else {
+            if let eventHandlerRef {
+                RemoveEventHandler(eventHandlerRef)
+            }
             throw RegistrationError.hotKey(hotKeyStatus)
         }
     }
