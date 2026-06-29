@@ -14,6 +14,13 @@ FINAL_ZIP="$RELEASE_DIR/$APP_NAME-$APP_VERSION-macOS.zip"
 
 cd "$ROOT_DIR"
 
+create_clean_zip() {
+    local source_path="$1"
+    local zip_path="$2"
+
+    COPYFILE_DISABLE=1 ditto -c -k --norsrc --noextattr --keepParent "$source_path" "$zip_path"
+}
+
 developer_id_identity="${ALTP_DEVELOPER_ID_IDENTITY:-${ALTP_CODESIGN_IDENTITY:-}}"
 if [[ -z "$developer_id_identity" ]] && command -v security >/dev/null 2>&1; then
     developer_id_identity="$(
@@ -60,7 +67,7 @@ codesign --verify --deep --strict --verbose=2 "$APP_DIR"
 codesign --display --verbose=2 "$APP_DIR"
 
 rm -f "$NOTARY_ZIP" "$FINAL_ZIP"
-ditto -c -k --keepParent "$APP_DIR" "$NOTARY_ZIP"
+create_clean_zip "$APP_DIR" "$NOTARY_ZIP"
 
 echo "Submitting $NOTARY_ZIP for notarization..."
 xcrun notarytool submit "$NOTARY_ZIP" "${notary_args[@]}" --wait
@@ -68,6 +75,6 @@ xcrun notarytool submit "$NOTARY_ZIP" "${notary_args[@]}" --wait
 xcrun stapler staple "$APP_DIR"
 xcrun stapler validate "$APP_DIR"
 
-ditto -c -k --keepParent "$APP_DIR" "$FINAL_ZIP"
+create_clean_zip "$APP_DIR" "$FINAL_ZIP"
 
 echo "Release artifact: $FINAL_ZIP"
