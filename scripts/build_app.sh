@@ -63,6 +63,7 @@ printf "APPL????" > "$CONTENTS_DIR/PkgInfo"
 
 if command -v codesign >/dev/null 2>&1; then
     CODESIGN_IDENTITY="${ALTP_CODESIGN_IDENTITY:-}"
+    CODESIGN_OPTIONS="${ALTP_CODESIGN_OPTIONS:-runtime}"
 
     if [[ -z "$CODESIGN_IDENTITY" ]] && command -v security >/dev/null 2>&1; then
         CODESIGN_IDENTITY="$(
@@ -82,10 +83,14 @@ if command -v codesign >/dev/null 2>&1; then
 
     if [[ -n "$CODESIGN_IDENTITY" ]]; then
         CODESIGN_TIMESTAMP="${ALTP_CODESIGN_TIMESTAMP:-none}"
+        codesign_options_args=()
+        if [[ -n "$CODESIGN_OPTIONS" ]]; then
+            codesign_options_args=(--options "$CODESIGN_OPTIONS")
+        fi
         if [[ "$CODESIGN_TIMESTAMP" == "1" || "$CODESIGN_TIMESTAMP" == "true" ]]; then
-            codesign --force --deep --timestamp --sign "$CODESIGN_IDENTITY" "$APP_DIR"
+            codesign --force --deep "${codesign_options_args[@]}" --timestamp --sign "$CODESIGN_IDENTITY" "$APP_DIR"
         else
-            codesign --force --deep --timestamp=none --sign "$CODESIGN_IDENTITY" "$APP_DIR"
+            codesign --force --deep "${codesign_options_args[@]}" --timestamp=none --sign "$CODESIGN_IDENTITY" "$APP_DIR"
         fi
         echo "Signed with: $CODESIGN_IDENTITY"
     elif [[ "${ALTP_ALLOW_ADHOC:-}" == "1" ]]; then

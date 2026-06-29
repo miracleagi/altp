@@ -44,14 +44,22 @@ ALTP_ALLOW_ADHOC=1 ./scripts/build_app.sh
 
 ## 发布
 
-正式发给其他人使用时，需要使用 `Developer ID Application` 证书签名并提交 Apple notarization：
+正式发给其他人使用时，需要使用 `Developer ID Application` 证书签名、启用 Hardened Runtime，并提交 Apple notarization。先确认本机有 Developer ID 证书：
+
+```bash
+security find-identity -v -p codesigning
+```
+
+第一次发布前，把 notarization 凭据存到 Keychain：
 
 ```bash
 xcrun notarytool store-credentials altp-notary \
   --apple-id <apple-id> \
-  --team-id <team-id> \
+  --team-id 35NCMHD8DT \
   --password <app-specific-password>
 ```
+
+`<app-specific-password>` 需要在 Apple ID 账号里创建，不是 Apple ID 登录密码。
 
 生成发布包：
 
@@ -59,16 +67,30 @@ xcrun notarytool store-credentials altp-notary \
 ALTP_NOTARY_KEYCHAIN_PROFILE=altp-notary ./scripts/release.sh
 ```
 
+如果本机有多个 Developer ID 证书，可以显式指定：
+
+```bash
+ALTP_DEVELOPER_ID_IDENTITY="Developer ID Application: Zheng Chuanchuan (35NCMHD8DT)" \
+ALTP_NOTARY_KEYCHAIN_PROFILE=altp-notary \
+./scripts/release.sh
+```
+
 发布脚本会执行：
 
 ```text
-build -> Developer ID signing -> zip -> notarization -> staple -> final zip
+build -> Developer ID signing with Hardened Runtime -> zip -> notarization -> staple -> final zip
 ```
 
 最终产物：
 
 ```text
 dist/release/Altp-0.1.0-macOS.zip
+```
+
+发布前可以验证 Gatekeeper 是否接受：
+
+```bash
+spctl -a -vvv -t exec dist/Altp.app
 ```
 
 ## 权限
