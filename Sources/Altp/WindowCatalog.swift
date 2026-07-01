@@ -67,14 +67,12 @@ final class WindowItem: NSObject {
     }
 
     var searchableText: String {
-        [
+        SearchText.searchableText(for: [
             title,
             appName,
             bundleIdentifier ?? "",
             subrole
-        ]
-        .joined(separator: " ")
-        .lowercased()
+        ])
     }
 
     var memoryKey: String {

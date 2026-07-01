@@ -8,6 +8,7 @@ final class QuickSwitchPanelController: NSObject {
     private let emptyLabel = NSTextField(labelWithString: "No windows")
     private var eventMonitor: Any?
     private var windows: [WindowItem] = []
+    private var sourceWindow: WindowItem?
 
     init(catalog: WindowCatalog) {
         self.catalog = catalog
@@ -41,6 +42,7 @@ final class QuickSwitchPanelController: NSObject {
 
     func hide() {
         panel.orderOut(nil)
+        sourceWindow = nil
     }
 
     private func show() {
@@ -50,7 +52,9 @@ final class QuickSwitchPanelController: NSObject {
             return
         }
 
-        windows = rankedWindows(catalog.allWindows())
+        let allWindows = catalog.allWindows()
+        sourceWindow = allWindows.first
+        windows = rankedWindows(allWindows)
         tableView.reloadData()
         emptyLabel.isHidden = !windows.isEmpty
 
@@ -197,8 +201,8 @@ final class QuickSwitchPanelController: NSObject {
 
         let currentWindow = items[0]
         let candidates = items.dropFirst().sorted { lhs, rhs in
-            let lhsScore = score(item: lhs)
-            let rhsScore = score(item: rhs)
+            let lhsScore = score(item: lhs, from: currentWindow)
+            let rhsScore = score(item: rhs, from: currentWindow)
 
             if lhsScore != rhsScore {
                 return lhsScore > rhsScore
@@ -210,7 +214,7 @@ final class QuickSwitchPanelController: NSObject {
         return [currentWindow] + candidates
     }
 
-    private func score(item: WindowItem) -> Int {
+    private func score(item: WindowItem, from source: WindowItem?) -> Int {
         var score = max(0, 1_000 - item.order)
 
         if item.isMinimized {
@@ -218,6 +222,7 @@ final class QuickSwitchPanelController: NSObject {
         }
 
         score += WindowSelectionMemory.shared.score(for: item, query: "")
+        score += WindowSelectionMemory.shared.transitionScore(from: source, to: item)
         return score
     }
 
@@ -249,9 +254,10 @@ final class QuickSwitchPanelController: NSObject {
         }
 
         let item = windows[row]
+        let source = sourceWindow
         hide()
         let result = catalog.activate(item)
-        WindowSelectionMemory.shared.recordSelection(item, query: "")
+        WindowSelectionMemory.shared.recordSelection(item, query: "", from: source)
 
         if result != .success {
             NSSound.beep()

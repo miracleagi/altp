@@ -269,8 +269,8 @@ final class SearchPanelController: NSObject {
     }
 
     private func applyFilter() {
-        let query = searchField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        let tokens = query.split(separator: " ").map(String.init)
+        let query = SearchText.normalize(searchField.stringValue)
+        let tokens = SearchText.tokens(in: query)
 
         filteredWindows = allWindows
             .compactMap { item -> (WindowItem, Int)? in
@@ -301,18 +301,19 @@ final class SearchPanelController: NSObject {
     }
 
     private func score(item: WindowItem, tokens: [String], query: String) -> Int {
-        let title = item.displayTitle.lowercased()
-        let appName = item.appName.lowercased()
         var score = max(0, 1_000 - item.order)
 
         for token in tokens {
-            if title.hasPrefix(token) {
+            let titleMatch = SearchText.matchQuality(token: token, in: item.displayTitle)
+            let appNameMatch = SearchText.matchQuality(token: token, in: item.appName)
+
+            if titleMatch == .prefix {
                 score += 700
-            } else if appName.hasPrefix(token) {
+            } else if appNameMatch == .prefix {
                 score += 550
-            } else if title.contains(token) {
+            } else if titleMatch == .contains {
                 score += 350
-            } else if appName.contains(token) {
+            } else if appNameMatch == .contains {
                 score += 250
             } else {
                 score += 50

@@ -5,8 +5,8 @@ Altp 是一个 macOS 窗口切换器原型：用 `Option + Space` 唤起类似 S
 ## 功能
 
 - 枚举当前运行 App 的窗口，而不是只切换 App。
-- 搜索窗口标题、App 名称和 bundle identifier。
-- 搜索和快速切换会记住你常选的窗口，后续相同或相近操作会优先展示。
+- 搜索窗口标题、App 名称和 bundle identifier；中文 App 名和窗口标题支持拼音搜索，例如输入 `feishu` 可以匹配 `飞书`。
+- 搜索和快速切换会记住你常选的窗口；如果最近一直在两个窗口之间切换，`Option + Tab` 会优先默认切回另一个窗口。
 - 默认过滤隐藏 App 的窗口和内部窗口标题（例如 WatermarkWidget），Settings 里可以编辑排除标题规则并选择是否显示最小化窗口。
 - 方向键选择，回车切换，Esc 关闭。
 - `Option + Tab` 打开快速切换器，连续按会移动选择，松开 Option 或按回车切换。
