@@ -1,4 +1,5 @@
 import AppKit
+import CoreGraphics
 
 final class QuickSwitchPanelController: NSObject {
     private let catalog: WindowCatalog
@@ -6,9 +7,13 @@ final class QuickSwitchPanelController: NSObject {
     private let tableView = NSTableView()
     private let scrollView = NSScrollView()
     private let emptyLabel = NSTextField(labelWithString: "No windows")
-    private var eventMonitor: Any?
+    private var localEventMonitor: Any?
+    private var globalEventMonitor: Any?
+    private var modifierReleaseTimer: Timer?
     private var windows: [WindowItem] = []
     private var sourceWindow: WindowItem?
+    private var shouldActivateOnModifierRelease = false
+    private var isActivatingSelection = false
 
     init(catalog: WindowCatalog) {
         self.catalog = catalog
@@ -26,26 +31,35 @@ final class QuickSwitchPanelController: NSObject {
     }
 
     deinit {
-        if let eventMonitor {
-            NSEvent.removeMonitor(eventMonitor)
+        if let localEventMonitor {
+            NSEvent.removeMonitor(localEventMonitor)
         }
+        if let globalEventMonitor {
+            NSEvent.removeMonitor(globalEventMonitor)
+        }
+        stopModifierReleasePolling()
     }
 
-    func showOrAdvance() {
+    func showOrAdvance(activateOnModifierRelease: Bool = false) {
         if panel.isVisible {
+            shouldActivateOnModifierRelease = shouldActivateOnModifierRelease || activateOnModifierRelease
+            startModifierReleasePollingIfNeeded()
             moveSelection(delta: 1)
             return
         }
 
-        show()
+        show(activateOnModifierRelease: activateOnModifierRelease)
     }
 
     func hide() {
         panel.orderOut(nil)
         sourceWindow = nil
+        shouldActivateOnModifierRelease = false
+        isActivatingSelection = false
+        stopModifierReleasePolling()
     }
 
-    private func show() {
+    private func show(activateOnModifierRelease: Bool) {
         guard AccessibilityPermission.isTrusted else {
             _ = AccessibilityPermission.requestIfNeeded()
             NSSound.beep()
@@ -54,6 +68,7 @@ final class QuickSwitchPanelController: NSObject {
 
         let allWindows = catalog.allWindows()
         sourceWindow = allWindows.first
+        shouldActivateOnModifierRelease = activateOnModifierRelease
         windows = rankedWindows(allWindows)
         tableView.reloadData()
         emptyLabel.isHidden = !windows.isEmpty
@@ -70,6 +85,7 @@ final class QuickSwitchPanelController: NSObject {
         NSApp.activate(ignoringOtherApps: true)
         panel.makeKeyAndOrderFront(nil)
         panel.makeFirstResponder(tableView)
+        startModifierReleasePollingIfNeeded()
     }
 
     private func configurePanel() {
@@ -134,16 +150,13 @@ final class QuickSwitchPanelController: NSObject {
     }
 
     private func installEventMonitor() {
-        eventMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .flagsChanged]) { [weak self] event in
+        localEventMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .flagsChanged]) { [weak self] event in
             guard let self, self.panel.isVisible else {
                 return event
             }
 
             if event.type == .flagsChanged {
-                if !event.modifierFlags.intersection(.deviceIndependentFlagsMask).contains(.option) {
-                    self.activateSelectedWindow()
-                    return nil
-                }
+                self.activateIfModifierWasReleased(event.modifierFlags)
                 return event
             }
 
@@ -165,6 +178,12 @@ final class QuickSwitchPanelController: NSObject {
                 return nil
             default:
                 return event
+            }
+        }
+
+        globalEventMonitor = NSEvent.addGlobalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
+            DispatchQueue.main.async {
+                self?.activateIfModifierWasReleased(event.modifierFlags)
             }
         }
     }
@@ -245,7 +264,57 @@ final class QuickSwitchPanelController: NSObject {
         tableView.scrollRowToVisible(row)
     }
 
+    private func activateIfModifierWasReleased(_ modifierFlags: NSEvent.ModifierFlags) {
+        guard shouldActivateOnModifierRelease,
+              panel.isVisible,
+              !isOptionPressed(in: modifierFlags) else {
+            return
+        }
+
+        activateSelectedWindow()
+    }
+
+    private func startModifierReleasePollingIfNeeded() {
+        guard shouldActivateOnModifierRelease, modifierReleaseTimer == nil else {
+            return
+        }
+
+        let timer = Timer(timeInterval: 0.05, repeats: true) { [weak self] _ in
+            self?.activateIfModifierIsNoLongerPressed()
+        }
+        modifierReleaseTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
+    }
+
+    private func stopModifierReleasePolling() {
+        modifierReleaseTimer?.invalidate()
+        modifierReleaseTimer = nil
+    }
+
+    private func activateIfModifierIsNoLongerPressed() {
+        guard shouldActivateOnModifierRelease,
+              panel.isVisible,
+              !isOptionPressedInSession() else {
+            return
+        }
+
+        activateSelectedWindow()
+    }
+
+    private func isOptionPressed(in flags: NSEvent.ModifierFlags) -> Bool {
+        flags.intersection(.deviceIndependentFlagsMask).contains(.option)
+    }
+
+    private func isOptionPressedInSession() -> Bool {
+        CGEventSource.flagsState(.combinedSessionState).contains(.maskAlternate)
+    }
+
     @objc private func activateSelectedWindow() {
+        guard !isActivatingSelection else {
+            return
+        }
+        isActivatingSelection = true
+
         let row = tableView.selectedRow >= 0 ? tableView.selectedRow : 0
         guard row >= 0, row < windows.count else {
             hide()
@@ -260,6 +329,7 @@ final class QuickSwitchPanelController: NSObject {
         WindowSelectionMemory.shared.recordSelection(item, query: "", from: source)
 
         if result != .success {
+            NSLog("Altp quick switch activation failed with AXError \(result.rawValue)")
             NSSound.beep()
         }
     }

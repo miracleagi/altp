@@ -48,8 +48,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func quickSwitchWindow() {
+        performQuickSwitch(activateOnModifierRelease: false)
+    }
+
+    private func performQuickSwitch(activateOnModifierRelease: Bool) {
         searchPanelController.hide()
-        quickSwitchController().showOrAdvance()
+        quickSwitchController().showOrAdvance(activateOnModifierRelease: activateOnModifierRelease)
     }
 
     @objc private func showPreferences() {
@@ -126,7 +130,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 modifiers: shortcut.modifiers,
                 action: { [weak self] in
                     DispatchQueue.main.async {
-                        self?.quickSwitchWindow()
+                        self?.performQuickSwitch(activateOnModifierRelease: true)
                     }
                 }
             )
