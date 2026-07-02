@@ -37,9 +37,13 @@ enum WindowRanking {
             return lhsStats.selectionCount > rhsStats.selectionCount
         }
 
+        if lhsStats.appSelectionCount != rhsStats.appSelectionCount {
+            return lhsStats.appSelectionCount > rhsStats.appSelectionCount
+        }
+
         if lhsStats.hasSelections, rhsStats.hasSelections,
-           lhsStats.lastSelectedAt != rhsStats.lastSelectedAt {
-            return lhsStats.lastSelectedAt > rhsStats.lastSelectedAt
+           lhsStats.latestSelectedAt != rhsStats.latestSelectedAt {
+            return lhsStats.latestSelectedAt > rhsStats.latestSelectedAt
         }
 
         if lhs.hasMeaningfulTitle != rhs.hasMeaningfulTitle {

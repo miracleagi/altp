@@ -10,16 +10,23 @@ final class WindowSelectionMemory {
 
     private struct Snapshot: Codable {
         var records: [String: Record] = [:]
+        var appRecords: [String: Record] = [:]
         var transitions: [String: TransitionRecord] = [:]
 
-        init(records: [String: Record] = [:], transitions: [String: TransitionRecord] = [:]) {
+        init(
+            records: [String: Record] = [:],
+            appRecords: [String: Record] = [:],
+            transitions: [String: TransitionRecord] = [:]
+        ) {
             self.records = records
+            self.appRecords = appRecords
             self.transitions = transitions
         }
 
         init(from decoder: Decoder) throws {
             let container = try decoder.container(keyedBy: CodingKeys.self)
             records = try container.decodeIfPresent([String: Record].self, forKey: .records) ?? [:]
+            appRecords = try container.decodeIfPresent([String: Record].self, forKey: .appRecords) ?? [:]
             transitions = try container.decodeIfPresent([String: TransitionRecord].self, forKey: .transitions) ?? [:]
         }
     }
@@ -37,24 +44,50 @@ final class WindowSelectionMemory {
 
     struct UsageStats {
         let selectionCount: Int
+        let appSelectionCount: Int
         let lastSelectedAt: TimeInterval
+        let appLastSelectedAt: TimeInterval
 
         var hasSelections: Bool {
-            selectionCount > 0
+            selectionCount > 0 || appSelectionCount > 0
+        }
+
+        var latestSelectedAt: TimeInterval {
+            max(lastSelectedAt, appLastSelectedAt)
         }
     }
 
     private let maxRecords = 500
+    private let maxAppRecords = 200
     private let maxTransitions = 800
     private let maxQueriesPerRecord = 24
     private var cachedSnapshot: Snapshot?
 
     func score(for item: WindowItem, query: String) -> Int {
         let normalizedQuery = Self.normalizedQuery(query)
-        guard let record = snapshot().records[item.memoryKey] else {
-            return 0
+        let snapshot = snapshot()
+        guard let record = snapshot.records[item.memoryKey] else {
+            return appScore(for: item, query: normalizedQuery, snapshot: snapshot)
         }
 
+        return score(for: record, query: normalizedQuery)
+            + appScore(for: item, query: normalizedQuery, snapshot: snapshot)
+    }
+
+    func usageStats(for item: WindowItem) -> UsageStats {
+        let snapshot = snapshot()
+        let record = snapshot.records[item.memoryKey]
+        let appRecord = snapshot.appRecords[item.appMemoryKey]
+
+        return UsageStats(
+            selectionCount: record?.selectionCount ?? 0,
+            appSelectionCount: appRecord?.selectionCount ?? 0,
+            lastSelectedAt: record?.lastSelectedAt ?? 0,
+            appLastSelectedAt: appRecord?.lastSelectedAt ?? 0
+        )
+    }
+
+    private func score(for record: Record, query normalizedQuery: String) -> Int {
         var score = min(360, record.selectionCount * 30)
         score += recencyBonus(lastSelectedAt: record.lastSelectedAt)
 
@@ -66,15 +99,20 @@ final class WindowSelectionMemory {
         return score
     }
 
-    func usageStats(for item: WindowItem) -> UsageStats {
-        guard let record = snapshot().records[item.memoryKey] else {
-            return UsageStats(selectionCount: 0, lastSelectedAt: 0)
+    private func appScore(for item: WindowItem, query normalizedQuery: String, snapshot: Snapshot) -> Int {
+        guard let record = snapshot.appRecords[item.appMemoryKey] else {
+            return 0
         }
 
-        return UsageStats(
-            selectionCount: record.selectionCount,
-            lastSelectedAt: record.lastSelectedAt
-        )
+        var score = min(240, record.selectionCount * 12)
+        score += recencyBonus(lastSelectedAt: record.lastSelectedAt) / 2
+
+        if !normalizedQuery.isEmpty {
+            score += min(300, (record.queryHits[normalizedQuery] ?? 0) * 100)
+            score += relatedQueryBonus(record: record, query: normalizedQuery) / 2
+        }
+
+        return score
     }
 
     func transitionScore(from source: WindowItem?, to target: WindowItem) -> Int {
@@ -117,6 +155,21 @@ final class WindowSelectionMemory {
 
         snapshot.records[item.memoryKey] = record
 
+        var appRecord = snapshot.appRecords[item.appMemoryKey] ?? Record(
+            selectionCount: 0,
+            lastSelectedAt: 0,
+            queryHits: [:]
+        )
+        appRecord.selectionCount += 1
+        appRecord.lastSelectedAt = record.lastSelectedAt
+
+        if !normalizedQuery.isEmpty {
+            appRecord.queryHits[normalizedQuery, default: 0] += 1
+            trimQueries(in: &appRecord)
+        }
+
+        snapshot.appRecords[item.appMemoryKey] = appRecord
+
         if let source, source.memoryKey != item.memoryKey {
             let transitionKey = Self.transitionKey(from: source.memoryKey, to: item.memoryKey)
             var transition = snapshot.transitions[transitionKey] ?? TransitionRecord(
@@ -129,6 +182,7 @@ final class WindowSelectionMemory {
         }
 
         trimRecords(in: &snapshot)
+        trimAppRecords(in: &snapshot)
         trimTransitions(in: &snapshot)
         cachedSnapshot = snapshot
         save(snapshot)
@@ -219,6 +273,26 @@ final class WindowSelectionMemory {
 
         for key in keysToRemove {
             snapshot.records.removeValue(forKey: key)
+        }
+    }
+
+    private func trimAppRecords(in snapshot: inout Snapshot) {
+        guard snapshot.appRecords.count > maxAppRecords else {
+            return
+        }
+
+        let keysToRemove = snapshot.appRecords
+            .sorted { lhs, rhs in
+                if lhs.value.lastSelectedAt != rhs.value.lastSelectedAt {
+                    return lhs.value.lastSelectedAt < rhs.value.lastSelectedAt
+                }
+                return lhs.value.selectionCount < rhs.value.selectionCount
+            }
+            .prefix(snapshot.appRecords.count - maxAppRecords)
+            .map(\.key)
+
+        for key in keysToRemove {
+            snapshot.appRecords.removeValue(forKey: key)
         }
     }
 

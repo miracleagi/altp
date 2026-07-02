@@ -88,6 +88,10 @@ final class WindowItem: NSObject {
         .joined(separator: "|")
     }
 
+    var appMemoryKey: String {
+        normalizedIdentityPart(bundleIdentifier ?? appName)
+    }
+
 }
 
 final class WindowCatalog {
