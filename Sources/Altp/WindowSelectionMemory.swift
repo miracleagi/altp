@@ -35,6 +35,15 @@ final class WindowSelectionMemory {
         var lastSelectedAt: TimeInterval
     }
 
+    struct UsageStats {
+        let selectionCount: Int
+        let lastSelectedAt: TimeInterval
+
+        var hasSelections: Bool {
+            selectionCount > 0
+        }
+    }
+
     private let maxRecords = 500
     private let maxTransitions = 800
     private let maxQueriesPerRecord = 24
@@ -55,6 +64,17 @@ final class WindowSelectionMemory {
         }
 
         return score
+    }
+
+    func usageStats(for item: WindowItem) -> UsageStats {
+        guard let record = snapshot().records[item.memoryKey] else {
+            return UsageStats(selectionCount: 0, lastSelectedAt: 0)
+        }
+
+        return UsageStats(
+            selectionCount: record.selectionCount,
+            lastSelectedAt: record.lastSelectedAt
+        )
     }
 
     func transitionScore(from source: WindowItem?, to target: WindowItem) -> Int {

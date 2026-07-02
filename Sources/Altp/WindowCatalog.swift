@@ -44,6 +44,10 @@ final class WindowItem: NSObject {
         title.isEmpty ? "Untitled Window" : title
     }
 
+    var hasMeaningfulTitle: Bool {
+        !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     var subtitle: String {
         var parts = [appName]
 

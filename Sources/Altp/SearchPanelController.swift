@@ -272,7 +272,7 @@ final class SearchPanelController: NSObject {
         let query = SearchText.normalize(searchField.stringValue)
         let tokens = SearchText.tokens(in: query)
 
-        filteredWindows = allWindows
+        let rankedWindows = allWindows
             .compactMap { item -> (WindowItem, Int)? in
                 if !tokens.isEmpty {
                     guard tokens.allSatisfy({ item.searchableText.contains($0) }) else {
@@ -282,13 +282,21 @@ final class SearchPanelController: NSObject {
 
                 return (item, score(item: item, tokens: tokens, query: query))
             }
-            .sorted { lhs, rhs in
-                if lhs.1 != rhs.1 {
-                    return lhs.1 > rhs.1
+
+        if tokens.isEmpty {
+            filteredWindows = rankedWindows
+                .map(\.0)
+                .sorted(by: isPreferredForEmptyQuery)
+        } else {
+            filteredWindows = rankedWindows
+                .sorted { lhs, rhs in
+                    if lhs.1 != rhs.1 {
+                        return lhs.1 > rhs.1
+                    }
+                    return lhs.0.order < rhs.0.order
                 }
-                return lhs.0.order < rhs.0.order
-            }
-            .map(\.0)
+                .map(\.0)
+        }
 
         tableView.reloadData()
         emptyLabel.isHidden = !filteredWindows.isEmpty || !AccessibilityPermission.isTrusted
@@ -301,7 +309,7 @@ final class SearchPanelController: NSObject {
     }
 
     private func score(item: WindowItem, tokens: [String], query: String) -> Int {
-        var score = max(0, 1_000 - item.order)
+        var score = tokens.isEmpty ? 0 : max(0, 1_000 - item.order)
 
         for token in tokens {
             let titleMatch = SearchText.matchQuality(token: token, in: item.displayTitle)
@@ -326,6 +334,26 @@ final class SearchPanelController: NSObject {
 
         score += WindowSelectionMemory.shared.score(for: item, query: query)
         return score
+    }
+
+    private func isPreferredForEmptyQuery(_ lhs: WindowItem, _ rhs: WindowItem) -> Bool {
+        let lhsStats = WindowSelectionMemory.shared.usageStats(for: lhs)
+        let rhsStats = WindowSelectionMemory.shared.usageStats(for: rhs)
+
+        if lhsStats.selectionCount != rhsStats.selectionCount {
+            return lhsStats.selectionCount > rhsStats.selectionCount
+        }
+
+        if lhsStats.hasSelections, rhsStats.hasSelections,
+           lhsStats.lastSelectedAt != rhsStats.lastSelectedAt {
+            return lhsStats.lastSelectedAt > rhsStats.lastSelectedAt
+        }
+
+        if lhs.hasMeaningfulTitle != rhs.hasMeaningfulTitle {
+            return lhs.hasMeaningfulTitle
+        }
+
+        return lhs.order < rhs.order
     }
 
     private func moveSelection(delta: Int) {
