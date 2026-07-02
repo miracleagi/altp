@@ -67,9 +67,9 @@ final class QuickSwitchPanelController: NSObject {
         }
 
         let allWindows = catalog.allWindows()
-        sourceWindow = currentWindow(in: allWindows)
+        sourceWindow = WindowRanking.currentWindow(in: allWindows)
         shouldActivateOnModifierRelease = activateOnModifierRelease
-        windows = rankedWindows(allWindows)
+        windows = WindowRanking.sortedForEmptyQuery(allWindows, sourceWindow: sourceWindow)
         tableView.reloadData()
         emptyLabel.isHidden = !windows.isEmpty
 
@@ -213,57 +213,12 @@ final class QuickSwitchPanelController: NSObject {
         }
     }
 
-    private func currentWindow(in items: [WindowItem]) -> WindowItem? {
-        guard let frontmostApp = NSWorkspace.shared.frontmostApplication else {
-            return items.first
-        }
-
-        return items.first { item in
-            item.app.processIdentifier == frontmostApp.processIdentifier && !item.isMinimized
-        } ?? items.first
-    }
-
-    private func rankedWindows(_ items: [WindowItem]) -> [WindowItem] {
-        guard items.count > 2 else {
-            return items
-        }
-
-        guard let currentWindow = sourceWindow else {
-            return items
-        }
-
-        let candidates = items.filter { $0.memoryKey != currentWindow.memoryKey }.sorted { lhs, rhs in
-            let lhsScore = score(item: lhs, from: currentWindow)
-            let rhsScore = score(item: rhs, from: currentWindow)
-
-            if lhsScore != rhsScore {
-                return lhsScore > rhsScore
-            }
-
-            return lhs.order < rhs.order
-        }
-
-        return [currentWindow] + candidates
-    }
-
     private func defaultSelectionRow() -> Int {
         guard let sourceWindow else {
             return 0
         }
 
         return windows.firstIndex { $0.memoryKey != sourceWindow.memoryKey } ?? 0
-    }
-
-    private func score(item: WindowItem, from source: WindowItem?) -> Int {
-        var score = max(0, 1_000 - item.order)
-
-        if item.isMinimized {
-            score -= 50
-        }
-
-        score += WindowSelectionMemory.shared.score(for: item, query: "")
-        score += WindowSelectionMemory.shared.transitionScore(from: source, to: item)
-        return score
     }
 
     private func moveSelection(delta: Int) {

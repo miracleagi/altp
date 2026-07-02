@@ -12,6 +12,7 @@ final class SearchPanelController: NSObject {
 
     private var allWindows: [WindowItem] = []
     private var filteredWindows: [WindowItem] = []
+    private var sourceWindow: WindowItem?
 
     init(catalog: WindowCatalog) {
         self.catalog = catalog
@@ -55,13 +56,16 @@ final class SearchPanelController: NSObject {
 
     func hide() {
         panel.orderOut(nil)
+        sourceWindow = nil
     }
 
     func reloadWindowList() {
         if AccessibilityPermission.isTrusted {
             allWindows = catalog.allWindows()
+            sourceWindow = WindowRanking.currentWindow(in: allWindows)
         } else {
             allWindows = []
+            sourceWindow = nil
         }
 
         permissionBanner.isHidden = AccessibilityPermission.isTrusted
@@ -284,16 +288,21 @@ final class SearchPanelController: NSObject {
             }
 
         if tokens.isEmpty {
-            filteredWindows = rankedWindows
-                .map(\.0)
-                .sorted(by: isPreferredForEmptyQuery)
+            filteredWindows = WindowRanking.sortedForEmptyQuery(
+                rankedWindows.map(\.0),
+                sourceWindow: sourceWindow
+            )
         } else {
             filteredWindows = rankedWindows
                 .sorted { lhs, rhs in
                     if lhs.1 != rhs.1 {
                         return lhs.1 > rhs.1
                     }
-                    return lhs.0.order < rhs.0.order
+                    return WindowRanking.isPreferred(
+                        lhs.0,
+                        over: rhs.0,
+                        sourceWindow: sourceWindow
+                    )
                 }
                 .map(\.0)
         }
@@ -334,26 +343,6 @@ final class SearchPanelController: NSObject {
 
         score += WindowSelectionMemory.shared.score(for: item, query: query)
         return score
-    }
-
-    private func isPreferredForEmptyQuery(_ lhs: WindowItem, _ rhs: WindowItem) -> Bool {
-        let lhsStats = WindowSelectionMemory.shared.usageStats(for: lhs)
-        let rhsStats = WindowSelectionMemory.shared.usageStats(for: rhs)
-
-        if lhsStats.selectionCount != rhsStats.selectionCount {
-            return lhsStats.selectionCount > rhsStats.selectionCount
-        }
-
-        if lhsStats.hasSelections, rhsStats.hasSelections,
-           lhsStats.lastSelectedAt != rhsStats.lastSelectedAt {
-            return lhsStats.lastSelectedAt > rhsStats.lastSelectedAt
-        }
-
-        if lhs.hasMeaningfulTitle != rhs.hasMeaningfulTitle {
-            return lhs.hasMeaningfulTitle
-        }
-
-        return lhs.order < rhs.order
     }
 
     private func moveSelection(delta: Int) {
