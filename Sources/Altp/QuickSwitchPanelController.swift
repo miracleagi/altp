@@ -70,6 +70,7 @@ final class QuickSwitchPanelController: NSObject {
         sourceWindow = WindowRanking.currentWindow(in: allWindows)
         shouldActivateOnModifierRelease = activateOnModifierRelease
         windows = WindowRanking.sortedForEmptyQuery(allWindows, sourceWindow: sourceWindow)
+        collectionView.selectionIndexPaths = []
         collectionView.reloadData()
         emptyLabel.isHidden = !windows.isEmpty
 
@@ -78,8 +79,8 @@ final class QuickSwitchPanelController: NSObject {
             return
         }
 
-        selectRow(defaultSelectionRow())
         positionPanel()
+        selectRow(defaultSelectionRow())
 
         panel.alphaValue = 1
         NSApp.activate(ignoringOtherApps: true)
@@ -266,8 +267,41 @@ final class QuickSwitchPanelController: NSObject {
         }
 
         let indexPath = IndexPath(item: row, section: 0)
-        collectionView.selectItems(at: [indexPath], scrollPosition: .nearestHorizontalEdge)
-        collectionView.scrollToItems(at: [indexPath], scrollPosition: .nearestHorizontalEdge)
+        collectionView.selectionIndexPaths = [indexPath]
+        scrollItemToVisible(at: indexPath)
+    }
+
+    private func scrollItemToVisible(at indexPath: IndexPath) {
+        panel.contentView?.layoutSubtreeIfNeeded()
+        collectionView.layoutSubtreeIfNeeded()
+
+        guard let layout = collectionView.collectionViewLayout,
+              let attributes = collectionView.layoutAttributesForItem(at: indexPath) else {
+            collectionView.scrollToItems(at: [indexPath], scrollPosition: .nearestHorizontalEdge)
+            return
+        }
+
+        let clipView = scrollView.contentView
+        let visibleRect = clipView.documentVisibleRect
+        let itemFrame = attributes.frame
+        let horizontalPadding: CGFloat = 12
+        var targetX = visibleRect.origin.x
+
+        if itemFrame.minX < visibleRect.minX + horizontalPadding {
+            targetX = itemFrame.minX - horizontalPadding
+        } else if itemFrame.maxX > visibleRect.maxX - horizontalPadding {
+            targetX = itemFrame.maxX - visibleRect.width + horizontalPadding
+        }
+
+        let maximumX = max(0, layout.collectionViewContentSize.width - visibleRect.width)
+        targetX = min(max(0, targetX), maximumX)
+
+        guard abs(targetX - visibleRect.origin.x) > 0.5 else {
+            return
+        }
+
+        clipView.scroll(to: NSPoint(x: targetX, y: visibleRect.origin.y))
+        scrollView.reflectScrolledClipView(clipView)
     }
 
     private func activateIfModifierWasReleased(_ modifierFlags: NSEvent.ModifierFlags) {
@@ -346,7 +380,7 @@ final class QuickSwitchPanelController: NSObject {
             return
         }
 
-        collectionView.selectItems(at: [indexPath], scrollPosition: [])
+        selectRow(indexPath.item)
         activateSelectedWindow()
     }
 }
