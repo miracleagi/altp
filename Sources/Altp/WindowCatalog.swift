@@ -130,6 +130,15 @@ final class WindowCatalog {
                 let frame = axFrame(window)
                 let isMinimized = axBool(window, kAXMinimizedAttribute as CFString) ?? false
                 let isHidden = app.isHidden
+                let appName = app.localizedName ?? app.bundleIdentifier ?? "Unknown App"
+
+                if shouldExcludeUntitledAuxiliaryWindow(
+                    appName: appName,
+                    bundleIdentifier: app.bundleIdentifier,
+                    title: title
+                ) {
+                    continue
+                }
 
                 if title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                    frame?.isEmpty != false {
@@ -148,7 +157,6 @@ final class WindowCatalog {
                     continue
                 }
 
-                let appName = app.localizedName ?? app.bundleIdentifier ?? "Unknown App"
                 let key = WindowOrdering.key(pid: app.processIdentifier, title: title)
                 let order = visibleOrder[key] ?? (10_000 + appIndex * 100 + windowIndex)
 
@@ -168,7 +176,7 @@ final class WindowCatalog {
             }
         }
 
-        return results.sorted { lhs, rhs in
+        return deduplicateFeishuMeetingWindows(results).sorted { lhs, rhs in
             if lhs.order != rhs.order {
                 return lhs.order < rhs.order
             }
@@ -327,4 +335,88 @@ private func isExcludedWindowTitle(
     return excludedTitlePatterns.contains { pattern in
         !pattern.isEmpty && normalizedTitle.contains(pattern)
     }
+}
+
+func shouldExcludeUntitledAuxiliaryWindow(
+    appName: String,
+    bundleIdentifier: String?,
+    title: String
+) -> Bool {
+    guard title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+        return false
+    }
+
+    if bundleIdentifier?.lowercased() == "com.electron.lark" ||
+        isFeishuMeetingApp(appName: appName, bundleIdentifier: bundleIdentifier) {
+        return true
+    }
+
+    let normalizedAppName = normalizedIdentityPart(appName)
+    return normalizedAppName == "飞书" ||
+        normalizedAppName == "飞书会议" ||
+        normalizedAppName == "feishu" ||
+        normalizedAppName == "feishu meeting" ||
+        normalizedAppName == "lark" ||
+        normalizedAppName == "lark meeting"
+}
+
+private func deduplicateFeishuMeetingWindows(_ items: [WindowItem]) -> [WindowItem] {
+    var primaryWindowByPID: [pid_t: WindowItem] = [:]
+
+    for item in items where isFeishuMeetingApp(
+        appName: item.appName,
+        bundleIdentifier: item.bundleIdentifier
+    ) {
+        let pid = item.app.processIdentifier
+        guard let current = primaryWindowByPID[pid] else {
+            primaryWindowByPID[pid] = item
+            continue
+        }
+
+        if isPreferredFeishuMeetingWindow(item, over: current) {
+            primaryWindowByPID[pid] = item
+        }
+    }
+
+    return items.filter { item in
+        guard isFeishuMeetingApp(
+            appName: item.appName,
+            bundleIdentifier: item.bundleIdentifier
+        ) else {
+            return true
+        }
+
+        return primaryWindowByPID[item.app.processIdentifier] === item
+    }
+}
+
+private func isPreferredFeishuMeetingWindow(
+    _ candidate: WindowItem,
+    over current: WindowItem
+) -> Bool {
+    if candidate.hasMeaningfulTitle != current.hasMeaningfulTitle {
+        return candidate.hasMeaningfulTitle
+    }
+
+    let candidateArea = candidate.frame.map { $0.width * $0.height } ?? 0
+    let currentArea = current.frame.map { $0.width * $0.height } ?? 0
+    if candidateArea != currentArea {
+        return candidateArea > currentArea
+    }
+
+    return candidate.order < current.order
+}
+
+private func isFeishuMeetingApp(
+    appName: String,
+    bundleIdentifier: String?
+) -> Bool {
+    if bundleIdentifier?.lowercased() == "com.electron.lark.iron" {
+        return true
+    }
+
+    let normalizedAppName = normalizedIdentityPart(appName)
+    return normalizedAppName == "飞书会议" ||
+        normalizedAppName == "feishu meeting" ||
+        normalizedAppName == "lark meeting"
 }

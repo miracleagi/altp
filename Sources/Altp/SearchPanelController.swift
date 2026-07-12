@@ -40,10 +40,6 @@ final class SearchPanelController: NSObject {
     }
 
     func show() {
-        if !AccessibilityPermission.isTrusted {
-            _ = AccessibilityPermission.requestIfNeeded()
-        }
-
         searchField.stringValue = ""
         reloadWindowList()
         positionPanel()

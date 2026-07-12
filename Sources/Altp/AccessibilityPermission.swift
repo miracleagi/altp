@@ -2,6 +2,8 @@ import AppKit
 import ApplicationServices
 
 enum AccessibilityPermission {
+    private(set) static var hasRequestedThisLaunch = false
+
     static var isTrusted: Bool {
         AXIsProcessTrusted()
     }
@@ -12,6 +14,12 @@ enum AccessibilityPermission {
             return true
         }
 
+        guard !hasRequestedThisLaunch else {
+            openSettings()
+            return false
+        }
+
+        hasRequestedThisLaunch = true
         let options = ["AXTrustedCheckOptionPrompt": true] as CFDictionary
         return AXIsProcessTrustedWithOptions(options)
     }

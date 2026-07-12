@@ -70,7 +70,6 @@ final class QuickSwitchPanelController: NSObject {
 
     private func show(activateOnModifierRelease: Bool) {
         guard AccessibilityPermission.isTrusted else {
-            _ = AccessibilityPermission.requestIfNeeded()
             NSSound.beep()
             return
         }

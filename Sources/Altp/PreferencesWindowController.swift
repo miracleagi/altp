@@ -1,7 +1,29 @@
 import AppKit
 
+private final class SettingsWindow: NSWindow {
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        if modifiers == .command,
+           event.charactersIgnoringModifiers?.lowercased() == "w" {
+            performClose(nil)
+            return true
+        }
+
+        return super.performKeyEquivalent(with: event)
+    }
+}
+
 final class PreferencesWindowController: NSWindowController {
     var onShortcutChanged: (() -> Void)?
+
+    private enum Layout {
+        static let windowWidth: CGFloat = 700
+        static let generalHeight: CGFloat = 720
+        static let permissionsHeight: CGFloat = 360
+        static let horizontalInset: CGFloat = 32
+        static let contentWidth = windowWidth - horizontalInset * 2
+        static let titleWidth: CGFloat = 164
+    }
 
     private enum Pane {
         case general
@@ -36,8 +58,13 @@ final class PreferencesWindowController: NSWindowController {
     private var currentPane: Pane = .general
 
     init() {
-        let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 620, height: 540),
+        let window = SettingsWindow(
+            contentRect: NSRect(
+                x: 0,
+                y: 0,
+                width: Layout.windowWidth,
+                height: Layout.generalHeight
+            ),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
@@ -127,19 +154,28 @@ final class PreferencesWindowController: NSWindowController {
 
         buildGeneralPane()
         buildPermissionsPane()
+        addCloseButton(to: generalPane)
+        addCloseButton(to: permissionsPane)
     }
 
     private func buildGeneralPane() {
-        let rootStack = paneStack(title: "General")
+        let rootStack = paneStack(
+            title: "General",
+            subtitle: "Choose how Altp finds windows and responds to shortcuts."
+        )
         generalPane.addSubview(rootStack)
 
         NSLayoutConstraint.activate([
-            rootStack.leadingAnchor.constraint(equalTo: generalPane.leadingAnchor, constant: 28),
-            rootStack.trailingAnchor.constraint(equalTo: generalPane.trailingAnchor, constant: -28),
-            rootStack.topAnchor.constraint(equalTo: generalPane.topAnchor, constant: 24)
+            rootStack.leadingAnchor.constraint(equalTo: generalPane.leadingAnchor, constant: Layout.horizontalInset),
+            rootStack.trailingAnchor.constraint(equalTo: generalPane.trailingAnchor, constant: -Layout.horizontalInset),
+            rootStack.topAnchor.constraint(equalTo: generalPane.topAnchor, constant: 28)
         ])
 
-        let resetSearchButton = secondaryButton(title: "Reset", action: #selector(resetSearchShortcut))
+        let resetSearchButton = secondaryButton(
+            title: "Reset",
+            action: #selector(resetSearchShortcut),
+            controlSize: .small
+        )
         searchShortcutButton.onShortcutChange = { [weak self] shortcut in
             AppSettings.searchShortcut = shortcut
             self?.updateSearchHotKeyStatus("Registering \(shortcut.displayString)...", isError: false)
@@ -147,7 +183,11 @@ final class PreferencesWindowController: NSWindowController {
         }
 
         let searchShortcutControls = horizontalStack([searchShortcutButton, resetSearchButton], spacing: 8)
-        let resetQuickSwitchButton = secondaryButton(title: "Reset", action: #selector(resetQuickSwitchShortcut))
+        let resetQuickSwitchButton = secondaryButton(
+            title: "Reset",
+            action: #selector(resetQuickSwitchShortcut),
+            controlSize: .small
+        )
         quickSwitchShortcutButton.onShortcutChange = { [weak self] shortcut in
             AppSettings.quickSwitchShortcut = shortcut
             self?.updateQuickSwitchHotKeyStatus("Registering \(shortcut.displayString)...", isError: false)
@@ -155,7 +195,7 @@ final class PreferencesWindowController: NSWindowController {
         }
 
         let quickSwitchControls = horizontalStack([quickSwitchShortcutButton, resetQuickSwitchButton], spacing: 8)
-        rootStack.addArrangedSubview(settingGroup(rows: [
+        rootStack.addArrangedSubview(settingSection(title: "SHORTCUTS", rows: [
             settingRow(
                 title: "Search Shortcut",
                 detail: "Use this shortcut to show or hide window search.",
@@ -177,11 +217,12 @@ final class PreferencesWindowController: NSWindowController {
         configureExcludedTitleTokenField()
         let resetExcludedTitlesButton = secondaryButton(
             title: "Reset",
-            action: #selector(resetExcludedWindowTitles)
+            action: #selector(resetExcludedWindowTitles),
+            controlSize: .small
         )
         let excludedTitleControls = horizontalStack([excludedTitleTokenField, resetExcludedTitlesButton], spacing: 8)
 
-        rootStack.addArrangedSubview(settingGroup(rows: [
+        rootStack.addArrangedSubview(settingSection(title: "WINDOWS", rows: [
             settingRow(
                 title: "Show Minimized Windows",
                 detail: "Hidden app windows are always excluded. Turn this off to hide minimized windows too.",
@@ -202,7 +243,7 @@ final class PreferencesWindowController: NSWindowController {
 
         let loginItemsButton = secondaryButton(title: "Open Login Items", action: #selector(openLoginItemsSettings))
         let startupControls = horizontalStack([launchAtLoginSwitch, loginItemsButton], spacing: 10)
-        rootStack.addArrangedSubview(settingGroup(rows: [
+        rootStack.addArrangedSubview(settingSection(title: "STARTUP", rows: [
             settingRow(
                 title: "Open at Login",
                 detail: "Start Altp automatically when you sign in.",
@@ -213,13 +254,16 @@ final class PreferencesWindowController: NSWindowController {
     }
 
     private func buildPermissionsPane() {
-        let rootStack = paneStack(title: "Permissions")
+        let rootStack = paneStack(
+            title: "Permissions",
+            subtitle: "Altp only needs access required to discover and focus your windows."
+        )
         permissionsPane.addSubview(rootStack)
 
         NSLayoutConstraint.activate([
-            rootStack.leadingAnchor.constraint(equalTo: permissionsPane.leadingAnchor, constant: 28),
-            rootStack.trailingAnchor.constraint(equalTo: permissionsPane.trailingAnchor, constant: -28),
-            rootStack.topAnchor.constraint(equalTo: permissionsPane.topAnchor, constant: 24)
+            rootStack.leadingAnchor.constraint(equalTo: permissionsPane.leadingAnchor, constant: Layout.horizontalInset),
+            rootStack.trailingAnchor.constraint(equalTo: permissionsPane.trailingAnchor, constant: -Layout.horizontalInset),
+            rootStack.topAnchor.constraint(equalTo: permissionsPane.topAnchor, constant: 28)
         ])
 
         requestAccessibilityButton.target = self
@@ -242,7 +286,7 @@ final class PreferencesWindowController: NSWindowController {
         let accessibilityActions = horizontalStack([requestAccessibilityButton, settingsButton, refreshButton], spacing: 8)
         let accessibilityControls = verticalStack([accessibilityState, accessibilityActions], spacing: 10)
 
-        rootStack.addArrangedSubview(settingGroup(rows: [
+        rootStack.addArrangedSubview(settingSection(title: "SYSTEM ACCESS", rows: [
             settingRow(
                 title: "Accessibility",
                 detail: "Required to list windows and focus the selected one.",
@@ -252,26 +296,58 @@ final class PreferencesWindowController: NSWindowController {
         ]))
     }
 
-    private func paneStack(title: String) -> NSStackView {
+    private func addCloseButton(to pane: NSView) {
+        let closeButton = NSButton(title: "Close", target: self, action: #selector(closeSettings))
+        closeButton.bezelStyle = .rounded
+        closeButton.controlSize = .regular
+        closeButton.keyEquivalent = "\u{1b}"
+        closeButton.keyEquivalentModifierMask = []
+        closeButton.translatesAutoresizingMaskIntoConstraints = false
+        pane.addSubview(closeButton)
+
+        NSLayoutConstraint.activate([
+            closeButton.trailingAnchor.constraint(equalTo: pane.trailingAnchor, constant: -Layout.horizontalInset),
+            closeButton.bottomAnchor.constraint(equalTo: pane.bottomAnchor, constant: -20)
+        ])
+    }
+
+    private func paneStack(title: String, subtitle: String) -> NSStackView {
         let titleLabel = NSTextField(labelWithString: title)
-        titleLabel.font = .systemFont(ofSize: 18, weight: .semibold)
+        titleLabel.font = .systemFont(ofSize: 22, weight: .semibold)
         titleLabel.textColor = .labelColor
 
-        let stack = NSStackView(views: [titleLabel])
+        let subtitleLabel = NSTextField(wrappingLabelWithString: subtitle)
+        subtitleLabel.font = .systemFont(ofSize: 13)
+        subtitleLabel.textColor = .secondaryLabelColor
+        subtitleLabel.maximumNumberOfLines = 2
+
+        let header = verticalStack([titleLabel, subtitleLabel], spacing: 5)
+        let stack = NSStackView(views: [header])
         stack.orientation = .vertical
         stack.alignment = .leading
-        stack.spacing = 16
+        stack.spacing = 22
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        return stack
+    }
+
+    private func settingSection(title: String, rows: [NSView]) -> NSView {
+        let label = NSTextField(labelWithString: title)
+        label.font = .systemFont(ofSize: 11, weight: .semibold)
+        label.textColor = .secondaryLabelColor
+
+        let stack = verticalStack([label, settingGroup(rows: rows)], spacing: 7)
         stack.translatesAutoresizingMaskIntoConstraints = false
         return stack
     }
 
     private func settingGroup(rows: [NSView]) -> NSView {
-        let group = NSView()
-        group.wantsLayer = true
-        group.layer?.cornerRadius = 8
-        group.layer?.borderWidth = 1
-        group.layer?.borderColor = NSColor.separatorColor.cgColor
-        group.layer?.backgroundColor = NSColor.controlBackgroundColor.withAlphaComponent(0.55).cgColor
+        let group = NSBox()
+        group.boxType = .custom
+        group.cornerRadius = 10
+        group.borderWidth = 1
+        group.borderColor = .separatorColor
+        group.fillColor = .controlBackgroundColor
+        group.contentViewMargins = .zero
         group.translatesAutoresizingMaskIntoConstraints = false
 
         let stack = NSStackView()
@@ -289,7 +365,7 @@ final class PreferencesWindowController: NSWindowController {
         }
 
         NSLayoutConstraint.activate([
-            group.widthAnchor.constraint(equalToConstant: 564),
+            group.widthAnchor.constraint(equalToConstant: Layout.contentWidth),
             stack.leadingAnchor.constraint(equalTo: group.leadingAnchor),
             stack.trailingAnchor.constraint(equalTo: group.trailingAnchor),
             stack.topAnchor.constraint(equalTo: group.topAnchor),
@@ -312,7 +388,7 @@ final class PreferencesWindowController: NSWindowController {
         titleLabel.font = .systemFont(ofSize: 13, weight: .medium)
         titleLabel.textColor = .labelColor
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
-        titleLabel.widthAnchor.constraint(equalToConstant: 150).isActive = true
+        titleLabel.widthAnchor.constraint(equalToConstant: Layout.titleWidth).isActive = true
 
         let detailLabel = NSTextField(labelWithString: detail)
         detailLabel.font = .systemFont(ofSize: 12)
@@ -332,16 +408,16 @@ final class PreferencesWindowController: NSWindowController {
         let contentStack = NSStackView(views: [titleLabel, rightStack])
         contentStack.orientation = .horizontal
         contentStack.alignment = .top
-        contentStack.spacing = 18
+        contentStack.spacing = 20
         contentStack.translatesAutoresizingMaskIntoConstraints = false
         row.addSubview(contentStack)
 
         NSLayoutConstraint.activate([
-            row.widthAnchor.constraint(equalToConstant: 564),
-            contentStack.leadingAnchor.constraint(equalTo: row.leadingAnchor, constant: 16),
-            contentStack.trailingAnchor.constraint(equalTo: row.trailingAnchor, constant: -16),
-            contentStack.topAnchor.constraint(equalTo: row.topAnchor, constant: 14),
-            contentStack.bottomAnchor.constraint(equalTo: row.bottomAnchor, constant: -14)
+            row.widthAnchor.constraint(equalToConstant: Layout.contentWidth),
+            contentStack.leadingAnchor.constraint(equalTo: row.leadingAnchor, constant: 18),
+            contentStack.trailingAnchor.constraint(equalTo: row.trailingAnchor, constant: -18),
+            contentStack.topAnchor.constraint(equalTo: row.topAnchor, constant: 15),
+            contentStack.bottomAnchor.constraint(equalTo: row.bottomAnchor, constant: -15)
         ])
 
         return row
@@ -351,7 +427,7 @@ final class PreferencesWindowController: NSWindowController {
         let separator = NSBox()
         separator.boxType = .separator
         separator.translatesAutoresizingMaskIntoConstraints = false
-        separator.widthAnchor.constraint(equalToConstant: 564).isActive = true
+        separator.widthAnchor.constraint(equalToConstant: Layout.contentWidth).isActive = true
         return separator
     }
 
@@ -371,10 +447,14 @@ final class PreferencesWindowController: NSWindowController {
         return stack
     }
 
-    private func secondaryButton(title: String, action: Selector) -> NSButton {
+    private func secondaryButton(
+        title: String,
+        action: Selector,
+        controlSize: NSControl.ControlSize = .regular
+    ) -> NSButton {
         let button = NSButton(title: title, target: self, action: action)
         button.bezelStyle = .rounded
-        button.controlSize = .regular
+        button.controlSize = controlSize
         return button
     }
 
@@ -382,6 +462,7 @@ final class PreferencesWindowController: NSWindowController {
         currentPane = pane
         generalPane.isHidden = pane != .general
         permissionsPane.isHidden = pane != .permissions
+        resizeWindow(for: pane)
 
         switch pane {
         case .general:
@@ -391,6 +472,37 @@ final class PreferencesWindowController: NSWindowController {
             window?.toolbar?.selectedItemIdentifier = ToolbarID.permissions
             window?.title = "Settings"
         }
+    }
+
+    private func resizeWindow(for pane: Pane) {
+        guard let window else {
+            return
+        }
+
+        let targetContentHeight: CGFloat = switch pane {
+        case .general:
+            Layout.generalHeight
+        case .permissions:
+            Layout.permissionsHeight
+        }
+
+        let targetFrame = window.frameRect(
+            forContentRect: NSRect(
+                x: 0,
+                y: 0,
+                width: Layout.windowWidth,
+                height: targetContentHeight
+            )
+        )
+        var frame = window.frame
+        let topEdge = frame.maxY
+        frame.size = targetFrame.size
+        frame.origin.y = topEdge - frame.height
+
+        guard abs(window.frame.height - frame.height) > 0.5 else {
+            return
+        }
+        window.setFrame(frame, display: true, animate: window.isVisible)
     }
 
     private func refreshLaunchAtLoginStatus() {
@@ -429,6 +541,9 @@ final class PreferencesWindowController: NSWindowController {
             accessibilityStatusLabel.textColor = .labelColor
             accessibilityDot.layer?.backgroundColor = NSColor.systemOrange.cgColor
             requestAccessibilityButton.isEnabled = true
+            requestAccessibilityButton.title = AccessibilityPermission.hasRequestedThisLaunch
+                ? "Open System Settings"
+                : "Request Permission"
         }
     }
 
@@ -441,7 +556,7 @@ final class PreferencesWindowController: NSWindowController {
         excludedTitleTokenField.target = self
         excludedTitleTokenField.action = #selector(updateExcludedWindowTitles)
         excludedTitleTokenField.translatesAutoresizingMaskIntoConstraints = false
-        excludedTitleTokenField.widthAnchor.constraint(equalToConstant: 286).isActive = true
+        excludedTitleTokenField.widthAnchor.constraint(equalToConstant: 312).isActive = true
     }
 
     private func refreshExcludedTitleRules() {
@@ -528,6 +643,10 @@ final class PreferencesWindowController: NSWindowController {
 
     @objc private func refreshStatuses() {
         refresh()
+    }
+
+    @objc private func closeSettings() {
+        window?.performClose(nil)
     }
 }
 

@@ -3,6 +3,7 @@ import Carbon.HIToolbox
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let launchAtLoginArgument = "--launch-at-login"
+    private let settingsArgument = "--settings"
     private let windowCatalog = WindowCatalog()
     private lazy var searchPanelController = SearchPanelController(catalog: windowCatalog)
     private var quickSwitchPanelController: QuickSwitchPanelController?
@@ -22,9 +23,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.accessory)
         setupStatusItem()
         setupHotKeys()
-        _ = AccessibilityPermission.requestIfNeeded()
 
-        if !ProcessInfo.processInfo.arguments.contains(launchAtLoginArgument) {
+        if ProcessInfo.processInfo.arguments.contains(settingsArgument) {
+            showPreferences()
+        } else if !ProcessInfo.processInfo.arguments.contains(launchAtLoginArgument) {
             searchPanelController.show()
         }
     }
