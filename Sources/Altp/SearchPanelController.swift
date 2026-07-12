@@ -371,9 +371,14 @@ final class SearchPanelController: NSObject {
         }
 
         let item = filteredWindows[row]
+        let source = sourceWindow
         hide()
         let result = catalog.activate(item)
-        WindowSelectionMemory.shared.recordSelection(item, query: searchField.stringValue)
+        WindowSelectionMemory.shared.recordSelection(
+            item,
+            query: searchField.stringValue,
+            from: source
+        )
         if result != .success {
             NSSound.beep()
         }

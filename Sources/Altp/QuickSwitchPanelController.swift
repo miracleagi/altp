@@ -4,7 +4,7 @@ import CoreGraphics
 final class QuickSwitchPanelController: NSObject {
     private let catalog: WindowCatalog
     private let panel: QuickSwitchPanel
-    private let tableView = NSTableView()
+    private let collectionView = NSCollectionView()
     private let scrollView = NSScrollView()
     private let emptyLabel = NSTextField(labelWithString: "No windows")
     private var localEventMonitor: Any?
@@ -70,7 +70,7 @@ final class QuickSwitchPanelController: NSObject {
         sourceWindow = WindowRanking.currentWindow(in: allWindows)
         shouldActivateOnModifierRelease = activateOnModifierRelease
         windows = WindowRanking.sortedForEmptyQuery(allWindows, sourceWindow: sourceWindow)
-        tableView.reloadData()
+        collectionView.reloadData()
         emptyLabel.isHidden = !windows.isEmpty
 
         guard !windows.isEmpty else {
@@ -84,7 +84,7 @@ final class QuickSwitchPanelController: NSObject {
         panel.alphaValue = 1
         NSApp.activate(ignoringOtherApps: true)
         panel.makeKeyAndOrderFront(nil)
-        panel.makeFirstResponder(tableView)
+        panel.makeFirstResponder(collectionView)
         startModifierReleasePollingIfNeeded()
     }
 
@@ -110,25 +110,33 @@ final class QuickSwitchPanelController: NSObject {
         effectView.layer?.masksToBounds = true
         panel.contentView = effectView
 
-        tableView.headerView = nil
-        tableView.rowHeight = 58
-        tableView.intercellSpacing = NSSize(width: 0, height: 2)
-        tableView.selectionHighlightStyle = .regular
-        tableView.usesAlternatingRowBackgroundColors = false
-        tableView.backgroundColor = .clear
-        tableView.delegate = self
-        tableView.dataSource = self
-        tableView.doubleAction = #selector(activateSelectedWindow)
-        tableView.target = self
+        let layout = NSCollectionViewFlowLayout()
+        layout.scrollDirection = .horizontal
+        layout.itemSize = NSSize(width: 108, height: 132)
+        layout.minimumInteritemSpacing = 8
+        layout.minimumLineSpacing = 8
+        layout.sectionInset = NSEdgeInsets(top: 10, left: 12, bottom: 10, right: 12)
 
-        let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("WindowColumn"))
-        column.resizingMask = .autoresizingMask
-        tableView.addTableColumn(column)
+        collectionView.collectionViewLayout = layout
+        collectionView.backgroundColors = [.clear]
+        collectionView.isSelectable = true
+        collectionView.allowsMultipleSelection = false
+        collectionView.delegate = self
+        collectionView.dataSource = self
+        collectionView.register(
+            QuickSwitchWindowItem.self,
+            forItemWithIdentifier: QuickSwitchWindowItem.identifier
+        )
 
         scrollView.drawsBackground = false
-        scrollView.hasVerticalScroller = true
+        scrollView.hasHorizontalScroller = false
+        scrollView.hasVerticalScroller = false
         scrollView.autohidesScrollers = true
-        scrollView.documentView = tableView
+        scrollView.horizontalScrollElasticity = .automatic
+        scrollView.verticalScrollElasticity = .none
+        scrollView.documentView = collectionView
+        scrollView.hasHorizontalScroller = false
+        scrollView.horizontalScroller = nil
         scrollView.translatesAutoresizingMaskIntoConstraints = false
         effectView.addSubview(scrollView)
 
@@ -139,10 +147,10 @@ final class QuickSwitchPanelController: NSObject {
         effectView.addSubview(emptyLabel)
 
         NSLayoutConstraint.activate([
-            scrollView.leadingAnchor.constraint(equalTo: effectView.leadingAnchor, constant: 10),
-            scrollView.trailingAnchor.constraint(equalTo: effectView.trailingAnchor, constant: -10),
-            scrollView.topAnchor.constraint(equalTo: effectView.topAnchor, constant: 10),
-            scrollView.bottomAnchor.constraint(equalTo: effectView.bottomAnchor, constant: -10),
+            scrollView.leadingAnchor.constraint(equalTo: effectView.leadingAnchor),
+            scrollView.trailingAnchor.constraint(equalTo: effectView.trailingAnchor),
+            scrollView.topAnchor.constraint(equalTo: effectView.topAnchor),
+            scrollView.bottomAnchor.constraint(equalTo: effectView.bottomAnchor),
 
             emptyLabel.centerXAnchor.constraint(equalTo: effectView.centerXAnchor),
             emptyLabel.centerYAnchor.constraint(equalTo: effectView.centerYAnchor)
@@ -150,13 +158,23 @@ final class QuickSwitchPanelController: NSObject {
     }
 
     private func installEventMonitor() {
-        localEventMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .flagsChanged]) { [weak self] event in
+        localEventMonitor = NSEvent.addLocalMonitorForEvents(
+            matching: [.keyDown, .flagsChanged, .leftMouseDown]
+        ) { [weak self] event in
             guard let self, self.panel.isVisible else {
                 return event
             }
 
             if event.type == .flagsChanged {
                 self.activateIfModifierWasReleased(event.modifierFlags)
+                return event
+            }
+
+            if event.type == .leftMouseDown {
+                if event.clickCount == 2 {
+                    self.activateItem(at: event.locationInWindow)
+                    return nil
+                }
                 return event
             }
 
@@ -175,6 +193,12 @@ final class QuickSwitchPanelController: NSObject {
                 return nil
             case 126:
                 self.moveSelection(delta: -1)
+                return nil
+            case 123:
+                self.moveSelection(delta: -1)
+                return nil
+            case 124:
+                self.moveSelection(delta: 1)
                 return nil
             default:
                 return event
@@ -195,9 +219,14 @@ final class QuickSwitchPanelController: NSObject {
         }
 
         let visibleFrame = screen.visibleFrame
-        let width = min(680, visibleFrame.width - 48)
-        let visibleRows = min(max(windows.count, 1), 7)
-        let height = min(CGFloat(visibleRows) * 60 + 20, visibleFrame.height - 96)
+        let itemWidth: CGFloat = 108
+        let spacing: CGFloat = 8
+        let visibleItems = min(max(windows.count, 1), 7)
+        let contentWidth = CGFloat(visibleItems) * itemWidth
+            + CGFloat(max(visibleItems - 1, 0)) * spacing
+            + 24
+        let width = min(max(contentWidth, 220), visibleFrame.width - 48)
+        let height = min(CGFloat(152), visibleFrame.height - 96)
         let origin = NSPoint(
             x: visibleFrame.midX - width / 2,
             y: visibleFrame.midY - height / 2 + visibleFrame.height * 0.08
@@ -226,7 +255,7 @@ final class QuickSwitchPanelController: NSObject {
             return
         }
 
-        let current = tableView.selectedRow >= 0 ? tableView.selectedRow : 0
+        let current = collectionView.selectionIndexPaths.first?.item ?? 0
         let next = (current + delta + windows.count) % windows.count
         selectRow(next)
     }
@@ -236,8 +265,9 @@ final class QuickSwitchPanelController: NSObject {
             return
         }
 
-        tableView.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
-        tableView.scrollRowToVisible(row)
+        let indexPath = IndexPath(item: row, section: 0)
+        collectionView.selectItems(at: [indexPath], scrollPosition: .nearestHorizontalEdge)
+        collectionView.scrollToItems(at: [indexPath], scrollPosition: .nearestHorizontalEdge)
     }
 
     private func activateIfModifierWasReleased(_ modifierFlags: NSEvent.ModifierFlags) {
@@ -291,7 +321,7 @@ final class QuickSwitchPanelController: NSObject {
         }
         isActivatingSelection = true
 
-        let row = tableView.selectedRow >= 0 ? tableView.selectedRow : 0
+        let row = collectionView.selectionIndexPaths.first?.item ?? 0
         guard row >= 0, row < windows.count else {
             hide()
             NSSound.beep()
@@ -309,24 +339,38 @@ final class QuickSwitchPanelController: NSObject {
             NSSound.beep()
         }
     }
+
+    private func activateItem(at windowLocation: NSPoint) {
+        let collectionLocation = collectionView.convert(windowLocation, from: nil)
+        guard let indexPath = collectionView.indexPathForItem(at: collectionLocation) else {
+            return
+        }
+
+        collectionView.selectItems(at: [indexPath], scrollPosition: [])
+        activateSelectedWindow()
+    }
 }
 
-extension QuickSwitchPanelController: NSTableViewDataSource, NSTableViewDelegate {
-    func numberOfRows(in tableView: NSTableView) -> Int {
+extension QuickSwitchPanelController: NSCollectionViewDataSource, NSCollectionViewDelegate {
+    func collectionView(_ collectionView: NSCollectionView, numberOfItemsInSection section: Int) -> Int {
         windows.count
     }
 
-    func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
-        guard row < windows.count else {
-            return nil
+    func collectionView(
+        _ collectionView: NSCollectionView,
+        itemForRepresentedObjectAt indexPath: IndexPath
+    ) -> NSCollectionViewItem {
+        let item = collectionView.makeItem(
+            withIdentifier: QuickSwitchWindowItem.identifier,
+            for: indexPath
+        )
+        guard let windowItem = item as? QuickSwitchWindowItem,
+              indexPath.item < windows.count else {
+            return item
         }
 
-        let identifier = QuickSwitchWindowCellView.identifier
-        let cell = tableView.makeView(withIdentifier: identifier, owner: self) as? QuickSwitchWindowCellView
-            ?? QuickSwitchWindowCellView()
-        cell.identifier = identifier
-        cell.configure(with: windows[row])
-        return cell
+        windowItem.configure(with: windows[indexPath.item])
+        return windowItem
     }
 }
 
@@ -346,62 +390,76 @@ private final class QuickSwitchPanel: NSPanel {
     }
 }
 
-private final class QuickSwitchWindowCellView: NSTableCellView {
-    static let identifier = NSUserInterfaceItemIdentifier("QuickSwitchWindowCellView")
+private final class QuickSwitchWindowItem: NSCollectionViewItem {
+    static let identifier = NSUserInterfaceItemIdentifier("QuickSwitchWindowItem")
 
     private let iconView = NSImageView()
     private let titleLabel = NSTextField(labelWithString: "")
-    private let detailLabel = NSTextField(labelWithString: "")
+    private let appLabel = NSTextField(labelWithString: "")
 
-    override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
-        build()
+    override var isSelected: Bool {
+        didSet {
+            updateSelectionAppearance()
+        }
     }
 
-    required init?(coder: NSCoder) {
-        nil
+    override func loadView() {
+        view = NSView()
+        buildInterface()
     }
 
     func configure(with item: WindowItem) {
         iconView.image = item.icon
         titleLabel.stringValue = item.displayTitle
-        detailLabel.stringValue = item.subtitle
+        appLabel.stringValue = item.appName
+        updateSelectionAppearance()
     }
 
-    private func build() {
-        wantsLayer = true
+    private func buildInterface() {
+        view.wantsLayer = true
+        view.layer?.cornerRadius = 10
 
         iconView.imageScaling = .scaleProportionallyUpOrDown
         iconView.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(iconView)
+        view.addSubview(iconView)
 
-        titleLabel.font = .systemFont(ofSize: 15, weight: .semibold)
+        titleLabel.font = .systemFont(ofSize: 13, weight: .medium)
         titleLabel.textColor = .labelColor
         titleLabel.lineBreakMode = .byTruncatingMiddle
         titleLabel.maximumNumberOfLines = 1
+        titleLabel.alignment = .center
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(titleLabel)
+        view.addSubview(titleLabel)
 
-        detailLabel.font = .systemFont(ofSize: 12)
-        detailLabel.textColor = .secondaryLabelColor
-        detailLabel.lineBreakMode = .byTruncatingTail
-        detailLabel.maximumNumberOfLines = 1
-        detailLabel.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(detailLabel)
+        appLabel.font = .systemFont(ofSize: 11)
+        appLabel.textColor = .secondaryLabelColor
+        appLabel.lineBreakMode = .byTruncatingTail
+        appLabel.maximumNumberOfLines = 1
+        appLabel.alignment = .center
+        appLabel.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(appLabel)
 
         NSLayoutConstraint.activate([
-            iconView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
-            iconView.centerYAnchor.constraint(equalTo: centerYAnchor),
-            iconView.widthAnchor.constraint(equalToConstant: 36),
-            iconView.heightAnchor.constraint(equalToConstant: 36),
+            iconView.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            iconView.topAnchor.constraint(equalTo: view.topAnchor, constant: 12),
+            iconView.widthAnchor.constraint(equalToConstant: 64),
+            iconView.heightAnchor.constraint(equalToConstant: 64),
 
-            titleLabel.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: 12),
-            titleLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
-            titleLabel.topAnchor.constraint(equalTo: topAnchor, constant: 8),
+            titleLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 6),
+            titleLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -6),
+            titleLabel.topAnchor.constraint(equalTo: iconView.bottomAnchor, constant: 8),
 
-            detailLabel.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
-            detailLabel.trailingAnchor.constraint(equalTo: titleLabel.trailingAnchor),
-            detailLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 4)
+            appLabel.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
+            appLabel.trailingAnchor.constraint(equalTo: titleLabel.trailingAnchor),
+            appLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 3)
         ])
+    }
+
+    private func updateSelectionAppearance() {
+        view.layer?.backgroundColor = isSelected
+            ? NSColor.selectedContentBackgroundColor.withAlphaComponent(0.32).cgColor
+            : NSColor.clear.cgColor
+        view.layer?.borderWidth = isSelected ? 1 : 0
+        view.layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.35).cgColor
     }
 }
