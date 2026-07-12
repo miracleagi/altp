@@ -1,6 +1,15 @@
 import AppKit
 import CoreGraphics
 
+private enum QuickSwitchLayout {
+    static let itemWidth: CGFloat = 168
+    static let itemHeight: CGFloat = 160
+    static let itemSpacing: CGFloat = 10
+    static let horizontalInset: CGFloat = 12
+    static let verticalInset: CGFloat = 10
+    static let maximumVisibleItems = 5
+}
+
 final class QuickSwitchPanelController: NSObject {
     private let catalog: WindowCatalog
     private let panel: QuickSwitchPanel
@@ -18,7 +27,7 @@ final class QuickSwitchPanelController: NSObject {
     init(catalog: WindowCatalog) {
         self.catalog = catalog
         self.panel = QuickSwitchPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 680, height: 420),
+            contentRect: NSRect(x: 0, y: 0, width: 904, height: 180),
             styleMask: [.borderless, .fullSizeContentView],
             backing: .buffered,
             defer: false
@@ -113,10 +122,18 @@ final class QuickSwitchPanelController: NSObject {
 
         let layout = NSCollectionViewFlowLayout()
         layout.scrollDirection = .horizontal
-        layout.itemSize = NSSize(width: 108, height: 132)
-        layout.minimumInteritemSpacing = 8
-        layout.minimumLineSpacing = 8
-        layout.sectionInset = NSEdgeInsets(top: 10, left: 12, bottom: 10, right: 12)
+        layout.itemSize = NSSize(
+            width: QuickSwitchLayout.itemWidth,
+            height: QuickSwitchLayout.itemHeight
+        )
+        layout.minimumInteritemSpacing = QuickSwitchLayout.itemSpacing
+        layout.minimumLineSpacing = QuickSwitchLayout.itemSpacing
+        layout.sectionInset = NSEdgeInsets(
+            top: QuickSwitchLayout.verticalInset,
+            left: QuickSwitchLayout.horizontalInset,
+            bottom: QuickSwitchLayout.verticalInset,
+            right: QuickSwitchLayout.horizontalInset
+        )
 
         collectionView.collectionViewLayout = layout
         collectionView.backgroundColors = [.clear]
@@ -220,14 +237,13 @@ final class QuickSwitchPanelController: NSObject {
         }
 
         let visibleFrame = screen.visibleFrame
-        let itemWidth: CGFloat = 108
-        let spacing: CGFloat = 8
-        let visibleItems = min(max(windows.count, 1), 7)
-        let contentWidth = CGFloat(visibleItems) * itemWidth
-            + CGFloat(max(visibleItems - 1, 0)) * spacing
-            + 24
-        let width = min(max(contentWidth, 220), visibleFrame.width - 48)
-        let height = min(CGFloat(152), visibleFrame.height - 96)
+        let visibleItems = min(max(windows.count, 1), QuickSwitchLayout.maximumVisibleItems)
+        let contentWidth = CGFloat(visibleItems) * QuickSwitchLayout.itemWidth
+            + CGFloat(max(visibleItems - 1, 0)) * QuickSwitchLayout.itemSpacing
+            + QuickSwitchLayout.horizontalInset * 2
+        let width = min(max(contentWidth, 240), visibleFrame.width - 48)
+        let contentHeight = QuickSwitchLayout.itemHeight + QuickSwitchLayout.verticalInset * 2
+        let height = min(contentHeight, visibleFrame.height - 96)
         let origin = NSPoint(
             x: visibleFrame.midX - width / 2,
             y: visibleFrame.midY - height / 2 + visibleFrame.height * 0.08
@@ -445,6 +461,7 @@ private final class QuickSwitchWindowItem: NSCollectionViewItem {
     func configure(with item: WindowItem) {
         iconView.image = item.icon
         titleLabel.stringValue = item.displayTitle
+        titleLabel.toolTip = item.displayTitle
         appLabel.stringValue = item.appName
         updateSelectionAppearance()
     }
@@ -460,7 +477,9 @@ private final class QuickSwitchWindowItem: NSCollectionViewItem {
         titleLabel.font = .systemFont(ofSize: 13, weight: .medium)
         titleLabel.textColor = .labelColor
         titleLabel.lineBreakMode = .byTruncatingMiddle
-        titleLabel.maximumNumberOfLines = 1
+        titleLabel.maximumNumberOfLines = 2
+        titleLabel.cell?.wraps = true
+        titleLabel.cell?.usesSingleLineMode = false
         titleLabel.alignment = .center
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(titleLabel)
@@ -482,10 +501,12 @@ private final class QuickSwitchWindowItem: NSCollectionViewItem {
             titleLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 6),
             titleLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -6),
             titleLabel.topAnchor.constraint(equalTo: iconView.bottomAnchor, constant: 8),
+            titleLabel.heightAnchor.constraint(equalToConstant: 34),
 
             appLabel.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
             appLabel.trailingAnchor.constraint(equalTo: titleLabel.trailingAnchor),
-            appLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 3)
+            appLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 3),
+            appLabel.bottomAnchor.constraint(lessThanOrEqualTo: view.bottomAnchor, constant: -8)
         ])
     }
 
