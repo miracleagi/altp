@@ -3,11 +3,11 @@ import CoreGraphics
 
 private enum QuickSwitchLayout {
     static let itemWidth: CGFloat = 168
-    static let itemHeight: CGFloat = 160
+    static let itemHeight: CGFloat = 142
     static let itemSpacing: CGFloat = 10
     static let horizontalInset: CGFloat = 12
     static let verticalInset: CGFloat = 10
-    static let maximumVisibleItems = 5
+    static let maximumVisibleItems = 7
 }
 
 final class QuickSwitchPanelController: NSObject {
@@ -27,7 +27,7 @@ final class QuickSwitchPanelController: NSObject {
     init(catalog: WindowCatalog) {
         self.catalog = catalog
         self.panel = QuickSwitchPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 904, height: 180),
+            contentRect: NSRect(x: 0, y: 0, width: 1_260, height: 162),
             styleMask: [.borderless, .fullSizeContentView],
             backing: .buffered,
             defer: false
@@ -446,6 +446,8 @@ private final class QuickSwitchWindowItem: NSCollectionViewItem {
     private let iconView = NSImageView()
     private let titleLabel = NSTextField(labelWithString: "")
     private let appLabel = NSTextField(labelWithString: "")
+    private var iconTopConstraint: NSLayoutConstraint?
+    private var titleHeightConstraint: NSLayoutConstraint?
 
     override var isSelected: Bool {
         didSet {
@@ -463,6 +465,7 @@ private final class QuickSwitchWindowItem: NSCollectionViewItem {
         titleLabel.stringValue = item.displayTitle
         titleLabel.toolTip = item.displayTitle
         appLabel.stringValue = item.appName
+        updateTitleLayout(for: item.displayTitle)
         updateSelectionAppearance()
     }
 
@@ -492,22 +495,38 @@ private final class QuickSwitchWindowItem: NSCollectionViewItem {
         appLabel.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(appLabel)
 
+        let iconTopConstraint = iconView.topAnchor.constraint(equalTo: view.topAnchor, constant: 20)
+        let titleHeightConstraint = titleLabel.heightAnchor.constraint(equalToConstant: 16)
+        self.iconTopConstraint = iconTopConstraint
+        self.titleHeightConstraint = titleHeightConstraint
+
         NSLayoutConstraint.activate([
             iconView.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            iconView.topAnchor.constraint(equalTo: view.topAnchor, constant: 12),
+            iconTopConstraint,
             iconView.widthAnchor.constraint(equalToConstant: 64),
             iconView.heightAnchor.constraint(equalToConstant: 64),
 
             titleLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 6),
             titleLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -6),
-            titleLabel.topAnchor.constraint(equalTo: iconView.bottomAnchor, constant: 8),
-            titleLabel.heightAnchor.constraint(equalToConstant: 34),
+            titleLabel.topAnchor.constraint(equalTo: iconView.bottomAnchor, constant: 6),
+            titleHeightConstraint,
 
             appLabel.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
             appLabel.trailingAnchor.constraint(equalTo: titleLabel.trailingAnchor),
-            appLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 3),
+            appLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 1),
             appLabel.bottomAnchor.constraint(lessThanOrEqualTo: view.bottomAnchor, constant: -8)
         ])
+    }
+
+    private func updateTitleLayout(for title: String) {
+        let availableWidth = QuickSwitchLayout.itemWidth - 12
+        let measuredWidth = (title as NSString).size(
+            withAttributes: [.font: titleLabel.font as Any]
+        ).width
+        let usesTwoLines = measuredWidth > availableWidth
+
+        titleHeightConstraint?.constant = usesTwoLines ? 32 : 16
+        iconTopConstraint?.constant = usesTwoLines ? 12 : 20
     }
 
     private func updateSelectionAppearance() {
