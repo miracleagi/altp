@@ -4,6 +4,7 @@ import Carbon.HIToolbox
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let launchAtLoginArgument = "--launch-at-login"
     private let settingsArgument = "--settings"
+    private let aboutArgument = "--about"
     private let windowCatalog = WindowCatalog()
     private lazy var searchPanelController = SearchPanelController(catalog: windowCatalog)
     private var quickSwitchPanelController: QuickSwitchPanelController?
@@ -24,7 +25,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         setupStatusItem()
         setupHotKeys()
 
-        if ProcessInfo.processInfo.arguments.contains(settingsArgument) {
+        if ProcessInfo.processInfo.arguments.contains(aboutArgument) {
+            showAbout()
+        } else if ProcessInfo.processInfo.arguments.contains(settingsArgument) {
             showPreferences()
         } else if !ProcessInfo.processInfo.arguments.contains(launchAtLoginArgument) {
             searchPanelController.show()
@@ -73,6 +76,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
             self?.suppressSearchPanelOnReopen = false
         }
+    }
+
+    @objc private func showAbout() {
+        let info = Bundle.main.infoDictionary ?? [:]
+        let version = info["CFBundleShortVersionString"] as? String ?? "Development"
+        let build = info["CFBundleVersion"] as? String ?? ""
+        let credits = NSAttributedString(
+            string: "A fast, focused window switcher for macOS.",
+            attributes: [
+                .foregroundColor: NSColor.secondaryLabelColor,
+                .font: NSFont.systemFont(ofSize: 11)
+            ]
+        )
+
+        NSApp.orderFrontStandardAboutPanel(options: [
+            .applicationName: "Altp",
+            .applicationVersion: version,
+            .version: build,
+            .credits: credits
+        ])
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     @objc private func requestAccessibilityPermission() {
@@ -152,6 +176,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         item.isVisible = true
 
         let menu = NSMenu()
+        menu.addItem(menuItem(
+            title: "About Altp",
+            action: #selector(showAbout),
+            keyEquivalent: ""
+        ))
+        menu.addItem(.separator())
         menu.addItem(menuItem(
             title: "Show Window Search",
             action: #selector(showSearchPanel),

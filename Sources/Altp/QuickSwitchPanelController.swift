@@ -263,7 +263,7 @@ final class QuickSwitchPanelController: NSObject {
             return 0
         }
 
-        return windows.firstIndex { $0.memoryKey != sourceWindow.memoryKey } ?? 0
+        return windows.firstIndex { !$0.representsSameWindow(as: sourceWindow) } ?? 0
     }
 
     private func moveSelection(delta: Int) {
@@ -381,9 +381,10 @@ final class QuickSwitchPanelController: NSObject {
         let source = sourceWindow
         hide()
         let result = catalog.activate(item)
-        WindowSelectionMemory.shared.recordSelection(item, query: "", from: source)
 
-        if result != .success {
+        if result == .success {
+            WindowSelectionMemory.shared.recordSelection(item, query: "", from: source)
+        } else {
             NSLog("Altp quick switch activation failed with AXError \(result.rawValue)")
             NSSound.beep()
         }

@@ -42,21 +42,6 @@ final class WindowSelectionMemory {
         var lastSelectedAt: TimeInterval
     }
 
-    struct UsageStats {
-        let selectionCount: Int
-        let appSelectionCount: Int
-        let lastSelectedAt: TimeInterval
-        let appLastSelectedAt: TimeInterval
-
-        var hasSelections: Bool {
-            selectionCount > 0 || appSelectionCount > 0
-        }
-
-        var latestSelectedAt: TimeInterval {
-            max(lastSelectedAt, appLastSelectedAt)
-        }
-    }
-
     private let maxRecords = 500
     private let maxAppRecords = 200
     private let maxTransitions = 800
@@ -74,29 +59,44 @@ final class WindowSelectionMemory {
             + appScore(for: item, query: normalizedQuery, snapshot: snapshot)
     }
 
-    func usageStats(for item: WindowItem) -> UsageStats {
+    func rankingScore(for item: WindowItem, referenceTime: TimeInterval) -> Int {
         let snapshot = snapshot()
-        let record = snapshot.records[item.memoryKey]
+        guard let record = snapshot.records[item.memoryKey] else {
+            return 0
+        }
         let appRecord = snapshot.appRecords[item.appMemoryKey]
 
-        return UsageStats(
-            selectionCount: record?.selectionCount ?? 0,
-            appSelectionCount: appRecord?.selectionCount ?? 0,
-            lastSelectedAt: record?.lastSelectedAt ?? 0,
-            appLastSelectedAt: appRecord?.lastSelectedAt ?? 0
+        let rawWindowScore = min(600, record.selectionCount * 30) + 240
+        var total = decayedScore(
+            rawWindowScore,
+            lastSelectedAt: record.lastSelectedAt,
+            horizonDays: 60,
+            referenceTime: referenceTime
         )
+
+        if let appRecord {
+            let rawAppScore = min(180, appRecord.selectionCount * 8) + 60
+            total += decayedScore(
+                rawAppScore,
+                lastSelectedAt: appRecord.lastSelectedAt,
+                horizonDays: 60,
+                referenceTime: referenceTime
+            )
+        }
+
+        return total
     }
 
     private func score(for record: Record, query normalizedQuery: String) -> Int {
         var score = min(360, record.selectionCount * 30)
-        score += recencyBonus(lastSelectedAt: record.lastSelectedAt)
 
         if !normalizedQuery.isEmpty {
             score += min(900, (record.queryHits[normalizedQuery] ?? 0) * 300)
             score += relatedQueryBonus(record: record, query: normalizedQuery)
         }
 
-        return score
+        return decayedScore(score, lastSelectedAt: record.lastSelectedAt, horizonDays: 60)
+            + recencyBonus(lastSelectedAt: record.lastSelectedAt)
     }
 
     private func appScore(for item: WindowItem, query normalizedQuery: String, snapshot: Snapshot) -> Int {
@@ -105,18 +105,22 @@ final class WindowSelectionMemory {
         }
 
         var score = min(240, record.selectionCount * 12)
-        score += recencyBonus(lastSelectedAt: record.lastSelectedAt) / 2
 
         if !normalizedQuery.isEmpty {
             score += min(300, (record.queryHits[normalizedQuery] ?? 0) * 100)
             score += relatedQueryBonus(record: record, query: normalizedQuery) / 2
         }
 
-        return score
+        return decayedScore(score, lastSelectedAt: record.lastSelectedAt, horizonDays: 60)
+            + recencyBonus(lastSelectedAt: record.lastSelectedAt) / 2
     }
 
-    func transitionScore(from source: WindowItem?, to target: WindowItem) -> Int {
-        guard let source, source.memoryKey != target.memoryKey else {
+    func transitionScore(
+        from source: WindowItem?,
+        to target: WindowItem,
+        referenceTime: TimeInterval
+    ) -> Int {
+        guard let source, !source.representsSameWindow(as: target) else {
             return 0
         }
 
@@ -126,11 +130,11 @@ final class WindowSelectionMemory {
 
         var totalScore = 0
         if let record = transitions[key] {
-            totalScore += transitionScore(for: record)
+            totalScore += transitionScore(for: record, referenceTime: referenceTime)
         }
 
         if let reverseRecord = transitions[reverseKey] {
-            totalScore += transitionScore(for: reverseRecord) / 2
+            totalScore += transitionScore(for: reverseRecord, referenceTime: referenceTime) / 2
         }
 
         return totalScore
@@ -170,7 +174,7 @@ final class WindowSelectionMemory {
 
         snapshot.appRecords[item.appMemoryKey] = appRecord
 
-        if let source, source.memoryKey != item.memoryKey {
+        if let source, !source.representsSameWindow(as: item) {
             let transitionKey = Self.transitionKey(from: source.memoryKey, to: item.memoryKey)
             var transition = snapshot.transitions[transitionKey] ?? TransitionRecord(
                 selectionCount: 0,
@@ -228,8 +232,11 @@ final class WindowSelectionMemory {
         return Int(240 * (1 - ageDays / 30))
     }
 
-    private func transitionRecencyBonus(lastSelectedAt: TimeInterval) -> Int {
-        let age = Date().timeIntervalSince1970 - lastSelectedAt
+    private func transitionRecencyBonus(
+        lastSelectedAt: TimeInterval,
+        referenceTime: TimeInterval
+    ) -> Int {
+        let age = referenceTime - lastSelectedAt
         let ageDays = max(0, age / 86_400)
         guard ageDays < 14 else {
             return 0
@@ -238,10 +245,40 @@ final class WindowSelectionMemory {
         return Int(2_000 * (1 - ageDays / 14))
     }
 
-    private func transitionScore(for transition: TransitionRecord) -> Int {
+    private func transitionScore(
+        for transition: TransitionRecord,
+        referenceTime: TimeInterval
+    ) -> Int {
         var score = min(3_000, transition.selectionCount * 750)
-        score += transitionRecencyBonus(lastSelectedAt: transition.lastSelectedAt)
-        return score
+        score += transitionRecencyBonus(
+            lastSelectedAt: transition.lastSelectedAt,
+            referenceTime: referenceTime
+        )
+        return decayedScore(
+            score,
+            lastSelectedAt: transition.lastSelectedAt,
+            horizonDays: 30,
+            referenceTime: referenceTime
+        )
+    }
+
+    private func decayedScore(
+        _ score: Int,
+        lastSelectedAt: TimeInterval,
+        horizonDays: Double,
+        referenceTime: TimeInterval = Date().timeIntervalSince1970
+    ) -> Int {
+        guard score > 0, lastSelectedAt > 0 else {
+            return 0
+        }
+
+        let ageSeconds = max(0, referenceTime - lastSelectedAt)
+        let ageDays = ageSeconds / 86_400
+        guard ageDays < horizonDays else {
+            return 0
+        }
+
+        return Int(Double(score) * (1 - ageDays / horizonDays))
     }
 
     private func relatedQueryBonus(record: Record, query: String) -> Int {

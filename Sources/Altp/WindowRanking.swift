@@ -1,4 +1,5 @@
 import AppKit
+import ApplicationServices
 
 enum WindowRanking {
     static func currentWindow(in items: [WindowItem]) -> WindowItem? {
@@ -6,50 +7,99 @@ enum WindowRanking {
             return items.first
         }
 
-        return items.first { item in
+        let frontmostItems = items.filter { item in
             item.app.processIdentifier == frontmostApp.processIdentifier && !item.isMinimized
-        } ?? items.first
+        }
+        guard !frontmostItems.isEmpty else {
+            return items.first
+        }
+
+        let axApp = AXUIElementCreateApplication(frontmostApp.processIdentifier)
+        var focusedValue: CFTypeRef?
+        if AXUIElementCopyAttributeValue(
+            axApp,
+            kAXFocusedWindowAttribute as CFString,
+            &focusedValue
+        ) == .success,
+           let focusedWindow = focusedValue {
+            let focusedAXWindow = unsafeBitCast(focusedWindow, to: AXUIElement.self)
+            if let exactMatch = frontmostItems.first(where: { item in
+                CFEqual(item.axWindow, focusedAXWindow)
+            }) {
+                return exactMatch
+            }
+        }
+
+        return frontmostItems.first
     }
 
     static func sortedForEmptyQuery(
         _ items: [WindowItem],
         sourceWindow: WindowItem?
     ) -> [WindowItem] {
-        items.sorted { lhs, rhs in
-            isPreferred(lhs, over: rhs, sourceWindow: sourceWindow)
+        let referenceTime = Date().timeIntervalSince1970
+        return items.sorted { lhs, rhs in
+            isPreferred(
+                lhs,
+                over: rhs,
+                sourceWindow: sourceWindow,
+                referenceTime: referenceTime
+            )
         }
     }
 
     static func isPreferred(
         _ lhs: WindowItem,
         over rhs: WindowItem,
-        sourceWindow: WindowItem?
+        sourceWindow: WindowItem?,
+        referenceTime: TimeInterval = Date().timeIntervalSince1970
     ) -> Bool {
-        let lhsTransitionScore = WindowSelectionMemory.shared.transitionScore(from: sourceWindow, to: lhs)
-        let rhsTransitionScore = WindowSelectionMemory.shared.transitionScore(from: sourceWindow, to: rhs)
+        let lhsTransitionScore = WindowSelectionMemory.shared.transitionScore(
+            from: sourceWindow,
+            to: lhs,
+            referenceTime: referenceTime
+        )
+        let rhsTransitionScore = WindowSelectionMemory.shared.transitionScore(
+            from: sourceWindow,
+            to: rhs,
+            referenceTime: referenceTime
+        )
         if lhsTransitionScore != rhsTransitionScore {
             return lhsTransitionScore > rhsTransitionScore
         }
 
-        let lhsStats = WindowSelectionMemory.shared.usageStats(for: lhs)
-        let rhsStats = WindowSelectionMemory.shared.usageStats(for: rhs)
-        if lhsStats.selectionCount != rhsStats.selectionCount {
-            return lhsStats.selectionCount > rhsStats.selectionCount
-        }
-
-        if lhsStats.appSelectionCount != rhsStats.appSelectionCount {
-            return lhsStats.appSelectionCount > rhsStats.appSelectionCount
-        }
-
-        if lhsStats.hasSelections, rhsStats.hasSelections,
-           lhsStats.latestSelectedAt != rhsStats.latestSelectedAt {
-            return lhsStats.latestSelectedAt > rhsStats.latestSelectedAt
+        let lhsUsageScore = WindowSelectionMemory.shared.rankingScore(
+            for: lhs,
+            referenceTime: referenceTime
+        )
+        let rhsUsageScore = WindowSelectionMemory.shared.rankingScore(
+            for: rhs,
+            referenceTime: referenceTime
+        )
+        if lhsUsageScore != rhsUsageScore {
+            return lhsUsageScore > rhsUsageScore
         }
 
         if lhs.hasMeaningfulTitle != rhs.hasMeaningfulTitle {
             return lhs.hasMeaningfulTitle
         }
 
-        return lhs.order < rhs.order
+        if lhs.order != rhs.order {
+            return lhs.order < rhs.order
+        }
+
+        if lhs.appName.localizedCaseInsensitiveCompare(rhs.appName) != .orderedSame {
+            return lhs.appName.localizedCaseInsensitiveCompare(rhs.appName) == .orderedAscending
+        }
+
+        if lhs.displayTitle.localizedCaseInsensitiveCompare(rhs.displayTitle) != .orderedSame {
+            return lhs.displayTitle.localizedCaseInsensitiveCompare(rhs.displayTitle) == .orderedAscending
+        }
+
+        if lhs.sessionSortKey != rhs.sessionSortKey {
+            return lhs.sessionSortKey < rhs.sessionSortKey
+        }
+
+        return lhs.catalogIndex < rhs.catalogIndex
     }
 }

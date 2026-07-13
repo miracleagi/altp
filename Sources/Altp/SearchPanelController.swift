@@ -271,6 +271,7 @@ final class SearchPanelController: NSObject {
     private func applyFilter() {
         let query = SearchText.normalize(searchField.stringValue)
         let tokens = SearchText.tokens(in: query)
+        let rankingReferenceTime = Date().timeIntervalSince1970
 
         let rankedWindows = allWindows
             .compactMap { item -> (WindowItem, Int)? in
@@ -297,7 +298,8 @@ final class SearchPanelController: NSObject {
                     return WindowRanking.isPreferred(
                         lhs.0,
                         over: rhs.0,
-                        sourceWindow: sourceWindow
+                        sourceWindow: sourceWindow,
+                        referenceTime: rankingReferenceTime
                     )
                 }
                 .map(\.0)
@@ -370,12 +372,13 @@ final class SearchPanelController: NSObject {
         let source = sourceWindow
         hide()
         let result = catalog.activate(item)
-        WindowSelectionMemory.shared.recordSelection(
-            item,
-            query: searchField.stringValue,
-            from: source
-        )
-        if result != .success {
+        if result == .success {
+            WindowSelectionMemory.shared.recordSelection(
+                item,
+                query: searchField.stringValue,
+                from: source
+            )
+        } else {
             NSSound.beep()
         }
     }

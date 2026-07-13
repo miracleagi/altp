@@ -11,8 +11,12 @@ final class WindowItem: NSObject {
     let isHidden: Bool
     let role: String
     let subrole: String
+    let document: String
+    let identifier: String
     let frame: CGRect?
     let order: Int
+    let catalogIndex: Int
+    let sessionSortKey: CFHashCode
 
     init(
         app: NSRunningApplication,
@@ -24,8 +28,11 @@ final class WindowItem: NSObject {
         isHidden: Bool,
         role: String,
         subrole: String,
+        document: String,
+        identifier: String,
         frame: CGRect?,
-        order: Int
+        order: Int,
+        catalogIndex: Int
     ) {
         self.app = app
         self.axWindow = axWindow
@@ -36,8 +43,12 @@ final class WindowItem: NSObject {
         self.isHidden = isHidden
         self.role = role
         self.subrole = subrole
+        self.document = document
+        self.identifier = identifier
         self.frame = frame
         self.order = order
+        self.catalogIndex = catalogIndex
+        self.sessionSortKey = CFHash(axWindow)
     }
 
     var displayTitle: String {
@@ -83,13 +94,36 @@ final class WindowItem: NSObject {
         [
             normalizedIdentityPart(bundleIdentifier ?? appName),
             normalizedIdentityPart(title),
-            normalizedIdentityPart(subrole)
+            normalizedIdentityPart(subrole),
+            persistentIdentityHint
         ]
         .joined(separator: "|")
     }
 
     var appMemoryKey: String {
         normalizedIdentityPart(bundleIdentifier ?? appName)
+    }
+
+    func representsSameWindow(as other: WindowItem) -> Bool {
+        CFEqual(axWindow, other.axWindow)
+    }
+
+    private var persistentIdentityHint: String {
+        let normalizedDocument = normalizedIdentityPart(document)
+        if !normalizedDocument.isEmpty {
+            return "document:\(normalizedDocument)"
+        }
+
+        let normalizedIdentifier = normalizedIdentityPart(identifier)
+        if !normalizedIdentifier.isEmpty {
+            return "identifier:\(normalizedIdentifier)"
+        }
+
+        guard let frame else {
+            return "frame:unknown"
+        }
+
+        return "frame:\(Int(frame.origin.x.rounded())),\(Int(frame.origin.y.rounded())),\(Int(frame.width.rounded())),\(Int(frame.height.rounded()))"
     }
 
 }
@@ -112,6 +146,7 @@ final class WindowCatalog {
             }
 
         var results: [WindowItem] = []
+        var nextCatalogIndex = 0
 
         for (appIndex, app) in apps.enumerated() {
             let axApp = AXUIElementCreateApplication(app.processIdentifier)
@@ -127,6 +162,8 @@ final class WindowCatalog {
 
                 let subrole = axString(window, kAXSubroleAttribute as CFString) ?? ""
                 let title = axString(window, kAXTitleAttribute as CFString) ?? ""
+                let document = axString(window, kAXDocumentAttribute as CFString) ?? ""
+                let identifier = axString(window, kAXIdentifierAttribute as CFString) ?? ""
                 let frame = axFrame(window)
                 let isMinimized = axBool(window, kAXMinimizedAttribute as CFString) ?? false
                 let isHidden = app.isHidden
@@ -157,8 +194,10 @@ final class WindowCatalog {
                     continue
                 }
 
-                let key = WindowOrdering.key(pid: app.processIdentifier, title: title)
+                let key = WindowOrdering.key(pid: app.processIdentifier, title: title, frame: frame)
                 let order = visibleOrder[key] ?? (10_000 + appIndex * 100 + windowIndex)
+                let catalogIndex = nextCatalogIndex
+                nextCatalogIndex += 1
 
                 results.append(WindowItem(
                     app: app,
@@ -170,8 +209,11 @@ final class WindowCatalog {
                     isHidden: isHidden,
                     role: role,
                     subrole: subrole,
+                    document: document,
+                    identifier: identifier,
                     frame: frame,
-                    order: order
+                    order: order,
+                    catalogIndex: catalogIndex
                 ))
             }
         }
@@ -183,7 +225,13 @@ final class WindowCatalog {
             if lhs.appName.localizedCaseInsensitiveCompare(rhs.appName) != .orderedSame {
                 return lhs.appName.localizedCaseInsensitiveCompare(rhs.appName) == .orderedAscending
             }
-            return lhs.displayTitle.localizedCaseInsensitiveCompare(rhs.displayTitle) == .orderedAscending
+            if lhs.displayTitle.localizedCaseInsensitiveCompare(rhs.displayTitle) != .orderedSame {
+                return lhs.displayTitle.localizedCaseInsensitiveCompare(rhs.displayTitle) == .orderedAscending
+            }
+            if lhs.sessionSortKey != rhs.sessionSortKey {
+                return lhs.sessionSortKey < rhs.sessionSortKey
+            }
+            return lhs.catalogIndex < rhs.catalogIndex
         }
     }
 
@@ -230,7 +278,8 @@ private enum WindowOrdering {
             }
 
             let title = window[kCGWindowName as String] as? String ?? ""
-            let key = key(pid: pid_t(pid), title: title)
+            let frame = cgFrame(window[kCGWindowBounds as String])
+            let key = key(pid: pid_t(pid), title: title, frame: frame)
             if order[key] == nil {
                 order[key] = index
             }
@@ -238,8 +287,20 @@ private enum WindowOrdering {
         return order
     }
 
-    static func key(pid: pid_t, title: String) -> String {
-        "\(pid)|\(title.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())"
+    static func key(pid: pid_t, title: String, frame: CGRect?) -> String {
+        let normalizedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard let frame else {
+            return "\(pid)|\(normalizedTitle)|frame:unknown"
+        }
+
+        return "\(pid)|\(normalizedTitle)|\(Int(frame.origin.x.rounded())),\(Int(frame.origin.y.rounded())),\(Int(frame.width.rounded())),\(Int(frame.height.rounded()))"
+    }
+
+    private static func cgFrame(_ value: Any?) -> CGRect? {
+        guard let dictionary = value as? NSDictionary else {
+            return nil
+        }
+        return CGRect(dictionaryRepresentation: dictionary as CFDictionary)
     }
 
     private static func intValue(_ value: Any?) -> Int? {

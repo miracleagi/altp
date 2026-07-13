@@ -17,12 +17,11 @@ final class PreferencesWindowController: NSWindowController {
     var onShortcutChanged: (() -> Void)?
 
     private enum Layout {
-        static let windowWidth: CGFloat = 700
-        static let generalHeight: CGFloat = 720
-        static let permissionsHeight: CGFloat = 360
-        static let horizontalInset: CGFloat = 32
+        static let windowWidth: CGFloat = 640
+        static let generalHeight: CGFloat = 610
+        static let permissionsHeight: CGFloat = 330
+        static let horizontalInset: CGFloat = 24
         static let contentWidth = windowWidth - horizontalInset * 2
-        static let titleWidth: CGFloat = 164
     }
 
     private enum Pane {
@@ -95,12 +94,12 @@ final class PreferencesWindowController: NSWindowController {
     }
 
     func updateSearchHotKeyStatus(_ message: String, isError: Bool) {
-        searchHotKeyStatusLabel.stringValue = message
+        searchHotKeyStatusLabel.stringValue = isError ? message : ""
         searchHotKeyStatusLabel.textColor = isError ? .systemRed : .secondaryLabelColor
     }
 
     func updateQuickSwitchHotKeyStatus(_ message: String, isError: Bool) {
-        quickSwitchHotKeyStatusLabel.stringValue = message
+        quickSwitchHotKeyStatusLabel.stringValue = isError ? message : ""
         quickSwitchHotKeyStatusLabel.textColor = isError ? .systemRed : .secondaryLabelColor
     }
 
@@ -168,7 +167,7 @@ final class PreferencesWindowController: NSWindowController {
         NSLayoutConstraint.activate([
             rootStack.leadingAnchor.constraint(equalTo: generalPane.leadingAnchor, constant: Layout.horizontalInset),
             rootStack.trailingAnchor.constraint(equalTo: generalPane.trailingAnchor, constant: -Layout.horizontalInset),
-            rootStack.topAnchor.constraint(equalTo: generalPane.topAnchor, constant: 28)
+            rootStack.topAnchor.constraint(equalTo: generalPane.topAnchor, constant: 22)
         ])
 
         let resetSearchButton = secondaryButton(
@@ -195,7 +194,7 @@ final class PreferencesWindowController: NSWindowController {
         }
 
         let quickSwitchControls = horizontalStack([quickSwitchShortcutButton, resetQuickSwitchButton], spacing: 8)
-        rootStack.addArrangedSubview(settingSection(title: "SHORTCUTS", rows: [
+        rootStack.addArrangedSubview(settingSection(title: "Shortcuts", rows: [
             settingRow(
                 title: "Search Shortcut",
                 detail: "Use this shortcut to show or hide window search.",
@@ -222,7 +221,7 @@ final class PreferencesWindowController: NSWindowController {
         )
         let excludedTitleControls = horizontalStack([excludedTitleTokenField, resetExcludedTitlesButton], spacing: 8)
 
-        rootStack.addArrangedSubview(settingSection(title: "WINDOWS", rows: [
+        rootStack.addArrangedSubview(settingSection(title: "Windows", rows: [
             settingRow(
                 title: "Show Minimized Windows",
                 detail: "Hidden app windows are always excluded. Turn this off to hide minimized windows too.",
@@ -243,7 +242,7 @@ final class PreferencesWindowController: NSWindowController {
 
         let loginItemsButton = secondaryButton(title: "Open Login Items", action: #selector(openLoginItemsSettings))
         let startupControls = horizontalStack([launchAtLoginSwitch, loginItemsButton], spacing: 10)
-        rootStack.addArrangedSubview(settingSection(title: "STARTUP", rows: [
+        rootStack.addArrangedSubview(settingSection(title: "Startup", rows: [
             settingRow(
                 title: "Open at Login",
                 detail: "Start Altp automatically when you sign in.",
@@ -263,7 +262,7 @@ final class PreferencesWindowController: NSWindowController {
         NSLayoutConstraint.activate([
             rootStack.leadingAnchor.constraint(equalTo: permissionsPane.leadingAnchor, constant: Layout.horizontalInset),
             rootStack.trailingAnchor.constraint(equalTo: permissionsPane.trailingAnchor, constant: -Layout.horizontalInset),
-            rootStack.topAnchor.constraint(equalTo: permissionsPane.topAnchor, constant: 28)
+            rootStack.topAnchor.constraint(equalTo: permissionsPane.topAnchor, constant: 22)
         ])
 
         requestAccessibilityButton.target = self
@@ -286,7 +285,7 @@ final class PreferencesWindowController: NSWindowController {
         let accessibilityActions = horizontalStack([requestAccessibilityButton, settingsButton, refreshButton], spacing: 8)
         let accessibilityControls = verticalStack([accessibilityState, accessibilityActions], spacing: 10)
 
-        rootStack.addArrangedSubview(settingSection(title: "SYSTEM ACCESS", rows: [
+        rootStack.addArrangedSubview(settingSection(title: "System Access", rows: [
             settingRow(
                 title: "Accessibility",
                 detail: "Required to list windows and focus the selected one.",
@@ -297,7 +296,7 @@ final class PreferencesWindowController: NSWindowController {
     }
 
     private func addCloseButton(to pane: NSView) {
-        let closeButton = NSButton(title: "Close", target: self, action: #selector(closeSettings))
+        let closeButton = NSButton(title: "Done", target: self, action: #selector(closeSettings))
         closeButton.bezelStyle = .rounded
         closeButton.controlSize = .regular
         closeButton.keyEquivalent = "\u{1b}"
@@ -307,35 +306,35 @@ final class PreferencesWindowController: NSWindowController {
 
         NSLayoutConstraint.activate([
             closeButton.trailingAnchor.constraint(equalTo: pane.trailingAnchor, constant: -Layout.horizontalInset),
-            closeButton.bottomAnchor.constraint(equalTo: pane.bottomAnchor, constant: -20)
+            closeButton.bottomAnchor.constraint(equalTo: pane.bottomAnchor, constant: -16)
         ])
     }
 
     private func paneStack(title: String, subtitle: String) -> NSStackView {
         let titleLabel = NSTextField(labelWithString: title)
-        titleLabel.font = .systemFont(ofSize: 22, weight: .semibold)
+        titleLabel.font = .systemFont(ofSize: 17, weight: .semibold)
         titleLabel.textColor = .labelColor
 
         let subtitleLabel = NSTextField(wrappingLabelWithString: subtitle)
-        subtitleLabel.font = .systemFont(ofSize: 13)
+        subtitleLabel.font = .systemFont(ofSize: 12)
         subtitleLabel.textColor = .secondaryLabelColor
         subtitleLabel.maximumNumberOfLines = 2
 
-        let header = verticalStack([titleLabel, subtitleLabel], spacing: 5)
+        let header = verticalStack([titleLabel, subtitleLabel], spacing: 3)
         let stack = NSStackView(views: [header])
         stack.orientation = .vertical
         stack.alignment = .leading
-        stack.spacing = 22
+        stack.spacing = 16
         stack.translatesAutoresizingMaskIntoConstraints = false
         return stack
     }
 
     private func settingSection(title: String, rows: [NSView]) -> NSView {
         let label = NSTextField(labelWithString: title)
-        label.font = .systemFont(ofSize: 11, weight: .semibold)
+        label.font = .systemFont(ofSize: 12, weight: .semibold)
         label.textColor = .secondaryLabelColor
 
-        let stack = verticalStack([label, settingGroup(rows: rows)], spacing: 7)
+        let stack = verticalStack([label, settingGroup(rows: rows)], spacing: 6)
         stack.translatesAutoresizingMaskIntoConstraints = false
         return stack
     }
@@ -343,7 +342,7 @@ final class PreferencesWindowController: NSWindowController {
     private func settingGroup(rows: [NSView]) -> NSView {
         let group = NSBox()
         group.boxType = .custom
-        group.cornerRadius = 10
+        group.cornerRadius = 8
         group.borderWidth = 1
         group.borderColor = .separatorColor
         group.fillColor = .controlBackgroundColor
@@ -388,7 +387,6 @@ final class PreferencesWindowController: NSWindowController {
         titleLabel.font = .systemFont(ofSize: 13, weight: .medium)
         titleLabel.textColor = .labelColor
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
-        titleLabel.widthAnchor.constraint(equalToConstant: Layout.titleWidth).isActive = true
 
         let detailLabel = NSTextField(labelWithString: detail)
         detailLabel.font = .systemFont(ofSize: 12)
@@ -396,28 +394,35 @@ final class PreferencesWindowController: NSWindowController {
         detailLabel.lineBreakMode = .byWordWrapping
         detailLabel.maximumNumberOfLines = 2
 
-        let rightStack = verticalStack([control, detailLabel], spacing: 6)
+        var labelViews: [NSView] = [titleLabel, detailLabel]
         if let statusLabel {
             statusLabel.font = .systemFont(ofSize: 12)
             statusLabel.textColor = .secondaryLabelColor
             statusLabel.lineBreakMode = .byWordWrapping
             statusLabel.maximumNumberOfLines = 2
-            rightStack.addArrangedSubview(statusLabel)
+            labelViews.append(statusLabel)
         }
 
-        let contentStack = NSStackView(views: [titleLabel, rightStack])
+        let labelStack = verticalStack(labelViews, spacing: 4)
+        labelStack.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        labelStack.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        control.setContentHuggingPriority(.required, for: .horizontal)
+        control.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+        let contentStack = NSStackView(views: [labelStack, control])
         contentStack.orientation = .horizontal
-        contentStack.alignment = .top
-        contentStack.spacing = 20
+        contentStack.alignment = .centerY
+        contentStack.distribution = .fill
+        contentStack.spacing = 16
         contentStack.translatesAutoresizingMaskIntoConstraints = false
         row.addSubview(contentStack)
 
         NSLayoutConstraint.activate([
             row.widthAnchor.constraint(equalToConstant: Layout.contentWidth),
-            contentStack.leadingAnchor.constraint(equalTo: row.leadingAnchor, constant: 18),
-            contentStack.trailingAnchor.constraint(equalTo: row.trailingAnchor, constant: -18),
-            contentStack.topAnchor.constraint(equalTo: row.topAnchor, constant: 15),
-            contentStack.bottomAnchor.constraint(equalTo: row.bottomAnchor, constant: -15)
+            contentStack.leadingAnchor.constraint(equalTo: row.leadingAnchor, constant: 16),
+            contentStack.trailingAnchor.constraint(equalTo: row.trailingAnchor, constant: -16),
+            contentStack.topAnchor.constraint(equalTo: row.topAnchor, constant: 12),
+            contentStack.bottomAnchor.constraint(equalTo: row.bottomAnchor, constant: -12)
         ])
 
         return row
@@ -556,7 +561,7 @@ final class PreferencesWindowController: NSWindowController {
         excludedTitleTokenField.target = self
         excludedTitleTokenField.action = #selector(updateExcludedWindowTitles)
         excludedTitleTokenField.translatesAutoresizingMaskIntoConstraints = false
-        excludedTitleTokenField.widthAnchor.constraint(equalToConstant: 312).isActive = true
+        excludedTitleTokenField.widthAnchor.constraint(equalToConstant: 220).isActive = true
     }
 
     private func refreshExcludedTitleRules() {
