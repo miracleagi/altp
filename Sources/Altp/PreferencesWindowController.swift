@@ -270,7 +270,6 @@ final class PreferencesWindowController: NSWindowController {
         requestAccessibilityButton.bezelStyle = .rounded
         requestAccessibilityButton.controlSize = .regular
 
-        let settingsButton = secondaryButton(title: "Open Settings", action: #selector(openAccessibilitySettings))
         let refreshButton = secondaryButton(title: "Refresh", action: #selector(refreshStatuses))
 
         accessibilityDot.wantsLayer = true
@@ -282,7 +281,7 @@ final class PreferencesWindowController: NSWindowController {
         ])
 
         let accessibilityState = horizontalStack([accessibilityDot, accessibilityStatusLabel], spacing: 8)
-        let accessibilityActions = horizontalStack([requestAccessibilityButton, settingsButton, refreshButton], spacing: 8)
+        let accessibilityActions = horizontalStack([requestAccessibilityButton, refreshButton], spacing: 8)
         let accessibilityControls = verticalStack([accessibilityState, accessibilityActions], spacing: 10)
 
         rootStack.addArrangedSubview(settingSection(title: "System Access", rows: [
@@ -640,10 +639,6 @@ final class PreferencesWindowController: NSWindowController {
     @objc private func requestAccessibilityPermission() {
         _ = AccessibilityPermission.requestIfNeeded()
         refreshAccessibilityStatus()
-    }
-
-    @objc private func openAccessibilitySettings() {
-        AccessibilityPermission.openSettings()
     }
 
     @objc private func refreshStatuses() {

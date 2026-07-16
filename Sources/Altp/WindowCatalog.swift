@@ -90,8 +90,21 @@ final class WindowItem: NSObject {
         ])
     }
 
-    var memoryKey: String {
-        [
+    var persistentMemoryKey: String? {
+        if isCursorWindow {
+            return [
+                normalizedIdentityPart(bundleIdentifier ?? appName),
+                normalizedIdentityPart(subrole),
+                cursorWorkspaceIdentity
+            ]
+            .joined(separator: "|")
+        }
+
+        if isChromeWindow {
+            return nil
+        }
+
+        return [
             normalizedIdentityPart(bundleIdentifier ?? appName),
             normalizedIdentityPart(title),
             normalizedIdentityPart(subrole),
@@ -104,8 +117,51 @@ final class WindowItem: NSObject {
         normalizedIdentityPart(bundleIdentifier ?? appName)
     }
 
+    var appSessionKey: String {
+        "\(appMemoryKey)|pid:\(app.processIdentifier)"
+    }
+
+    var sessionMemoryKey: String {
+        [
+            appSessionKey,
+            normalizedIdentityPart(subrole),
+            "window:\(sessionSortKey)"
+        ]
+        .joined(separator: "|")
+    }
+
     func representsSameWindow(as other: WindowItem) -> Bool {
         CFEqual(axWindow, other.axWindow)
+    }
+
+    private var isCursorWindow: Bool {
+        bundleIdentifier?.lowercased() == "com.todesktop.230313mzl4w4u92" ||
+            normalizedIdentityPart(appName) == "cursor"
+    }
+
+    private var isChromeWindow: Bool {
+        bundleIdentifier?.lowercased().hasPrefix("com.google.chrome") == true ||
+            normalizedIdentityPart(appName) == "google chrome"
+    }
+
+    private var cursorWorkspaceIdentity: String {
+        if let separatorRange = title.range(of: " — ", options: .backwards) {
+            let workspace = normalizedIdentityPart(String(title[separatorRange.upperBound...]))
+            if !workspace.isEmpty {
+                return "workspace:\(workspace)"
+            }
+        }
+
+        let normalizedIdentifier = normalizedIdentityPart(identifier)
+        if !normalizedIdentifier.isEmpty {
+            return "identifier:\(normalizedIdentifier)"
+        }
+
+        guard let frame else {
+            return "window:default"
+        }
+
+        return "frame:\(Int(frame.origin.x.rounded())),\(Int(frame.origin.y.rounded())),\(Int(frame.width.rounded())),\(Int(frame.height.rounded()))"
     }
 
     private var persistentIdentityHint: String {

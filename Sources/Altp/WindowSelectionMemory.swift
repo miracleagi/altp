@@ -1,33 +1,44 @@
 import Foundation
 
+struct WindowTransitionRank: Equatable {
+    static let none = WindowTransitionRank(lastSelectedAt: 0, selectionCount: 0)
+
+    let lastSelectedAt: TimeInterval
+    let selectionCount: Int
+}
+
+struct WindowSessionRank: Equatable {
+    static let none = WindowSessionRank(lastSelectedAt: 0, selectionCount: 0)
+
+    let lastSelectedAt: TimeInterval
+    let selectionCount: Int
+}
+
 final class WindowSelectionMemory {
     static let shared = WindowSelectionMemory()
 
     private enum DefaultsKey {
-        static let snapshot = "windowSelectionMemory.v2"
-        static let legacySnapshot = "windowSelectionMemory.v1"
+        static let snapshot = "windowSelectionMemory.v3"
+        static let legacySnapshot = "windowSelectionMemory.v2"
+        static let oldestSnapshot = "windowSelectionMemory.v1"
     }
 
     private struct Snapshot: Codable {
         var records: [String: Record] = [:]
         var appRecords: [String: Record] = [:]
-        var transitions: [String: TransitionRecord] = [:]
 
         init(
             records: [String: Record] = [:],
-            appRecords: [String: Record] = [:],
-            transitions: [String: TransitionRecord] = [:]
+            appRecords: [String: Record] = [:]
         ) {
             self.records = records
             self.appRecords = appRecords
-            self.transitions = transitions
         }
 
         init(from decoder: Decoder) throws {
             let container = try decoder.container(keyedBy: CodingKeys.self)
             records = try container.decodeIfPresent([String: Record].self, forKey: .records) ?? [:]
             appRecords = try container.decodeIfPresent([String: Record].self, forKey: .appRecords) ?? [:]
-            transitions = try container.decodeIfPresent([String: TransitionRecord].self, forKey: .transitions) ?? [:]
         }
     }
 
@@ -35,56 +46,197 @@ final class WindowSelectionMemory {
         var selectionCount: Int
         var lastSelectedAt: TimeInterval
         var queryHits: [String: Int]
+        var appSessionKey: String?
     }
 
-    private struct TransitionRecord: Codable {
+    private struct SessionRecord {
+        var selectionCount: Int
+        var lastSelectedAt: TimeInterval
+    }
+
+    private struct TransitionRecord {
         var selectionCount: Int
         var lastSelectedAt: TimeInterval
     }
 
     private let maxRecords = 500
     private let maxAppRecords = 200
-    private let maxTransitions = 800
+    private let maxSessionRecords = 500
+    private let maxSessionTransitions = 800
     private let maxQueriesPerRecord = 24
+    private let recentSessionHorizon: TimeInterval = 10 * 60
+    private let previousSessionMultiplier = 0.2
+
     private var cachedSnapshot: Snapshot?
+    private var sessionRecords: [String: SessionRecord] = [:]
+    private var sessionTransitions: [String: TransitionRecord] = [:]
 
     func score(for item: WindowItem, query: String) -> Int {
         let normalizedQuery = Self.normalizedQuery(query)
         let snapshot = snapshot()
-        guard let record = snapshot.records[item.memoryKey] else {
-            return appScore(for: item, query: normalizedQuery, snapshot: snapshot)
+        var total = appScore(for: item, query: normalizedQuery, snapshot: snapshot)
+
+        if let key = item.persistentMemoryKey,
+           let record = snapshot.records[key] {
+            total += scaledForCurrentSession(
+                score(for: record, query: normalizedQuery),
+                record: record,
+                currentAppSessionKey: item.appSessionKey
+            )
         }
 
-        return score(for: record, query: normalizedQuery)
-            + appScore(for: item, query: normalizedQuery, snapshot: snapshot)
+        return total
     }
 
     func rankingScore(for item: WindowItem, referenceTime: TimeInterval) -> Int {
         let snapshot = snapshot()
-        guard let record = snapshot.records[item.memoryKey] else {
-            return 0
+        var total = 0
+
+        if let key = item.persistentMemoryKey,
+           let record = snapshot.records[key] {
+            let rawWindowScore = min(600, record.selectionCount * 30) + 240
+            let windowScore = decayedScore(
+                rawWindowScore,
+                lastSelectedAt: record.lastSelectedAt,
+                horizonDays: 60,
+                referenceTime: referenceTime
+            )
+            total += scaledForCurrentSession(
+                windowScore,
+                record: record,
+                currentAppSessionKey: item.appSessionKey
+            )
         }
-        let appRecord = snapshot.appRecords[item.appMemoryKey]
 
-        let rawWindowScore = min(600, record.selectionCount * 30) + 240
-        var total = decayedScore(
-            rawWindowScore,
-            lastSelectedAt: record.lastSelectedAt,
-            horizonDays: 60,
-            referenceTime: referenceTime
-        )
-
-        if let appRecord {
+        if let appRecord = snapshot.appRecords[item.appMemoryKey] {
             let rawAppScore = min(180, appRecord.selectionCount * 8) + 60
-            total += decayedScore(
+            let appScore = decayedScore(
                 rawAppScore,
                 lastSelectedAt: appRecord.lastSelectedAt,
                 horizonDays: 60,
                 referenceTime: referenceTime
             )
+            total += scaledForCurrentSession(
+                appScore,
+                record: appRecord,
+                currentAppSessionKey: item.appSessionKey
+            )
         }
 
         return total
+    }
+
+    func transitionRank(
+        from source: WindowItem?,
+        to target: WindowItem,
+        referenceTime: TimeInterval
+    ) -> WindowTransitionRank {
+        guard let source, !source.representsSameWindow(as: target) else {
+            return .none
+        }
+
+        let directKey = Self.transitionKey(
+            from: source.sessionMemoryKey,
+            to: target.sessionMemoryKey
+        )
+        let reverseKey = Self.transitionKey(
+            from: target.sessionMemoryKey,
+            to: source.sessionMemoryKey
+        )
+        let records = [sessionTransitions[directKey], sessionTransitions[reverseKey]].compactMap { $0 }
+        guard let lastSelectedAt = records.map(\.lastSelectedAt).max(),
+              referenceTime - lastSelectedAt <= recentSessionHorizon else {
+            return .none
+        }
+
+        return WindowTransitionRank(
+            lastSelectedAt: lastSelectedAt,
+            selectionCount: records.reduce(0) { $0 + $1.selectionCount }
+        )
+    }
+
+    func sessionRank(
+        for item: WindowItem,
+        referenceTime: TimeInterval
+    ) -> WindowSessionRank {
+        guard let record = sessionRecords[item.sessionMemoryKey],
+              referenceTime - record.lastSelectedAt <= recentSessionHorizon else {
+            return .none
+        }
+
+        return WindowSessionRank(
+            lastSelectedAt: record.lastSelectedAt,
+            selectionCount: record.selectionCount
+        )
+    }
+
+    func recordSelection(_ item: WindowItem, query: String, from source: WindowItem? = nil) {
+        let normalizedQuery = Self.normalizedQuery(query)
+        let selectedAt = Date().timeIntervalSince1970
+
+        var sessionRecord = sessionRecords[item.sessionMemoryKey] ?? SessionRecord(
+            selectionCount: 0,
+            lastSelectedAt: 0
+        )
+        sessionRecord.selectionCount += 1
+        sessionRecord.lastSelectedAt = selectedAt
+        sessionRecords[item.sessionMemoryKey] = sessionRecord
+
+        if let source, !source.representsSameWindow(as: item) {
+            let transitionKey = Self.transitionKey(
+                from: source.sessionMemoryKey,
+                to: item.sessionMemoryKey
+            )
+            var transition = sessionTransitions[transitionKey] ?? TransitionRecord(
+                selectionCount: 0,
+                lastSelectedAt: 0
+            )
+            transition.selectionCount += 1
+            transition.lastSelectedAt = selectedAt
+            sessionTransitions[transitionKey] = transition
+        }
+
+        var snapshot = snapshot()
+        if let key = item.persistentMemoryKey {
+            var record = snapshot.records[key] ?? Record(
+                selectionCount: 0,
+                lastSelectedAt: 0,
+                queryHits: [:],
+                appSessionKey: item.appSessionKey
+            )
+            downgradeIfNeeded(&record, for: item.appSessionKey)
+            record.selectionCount += 1
+            record.lastSelectedAt = selectedAt
+
+            if !normalizedQuery.isEmpty {
+                record.queryHits[normalizedQuery, default: 0] += 1
+                trimQueries(in: &record)
+            }
+            snapshot.records[key] = record
+        }
+
+        var appRecord = snapshot.appRecords[item.appMemoryKey] ?? Record(
+            selectionCount: 0,
+            lastSelectedAt: 0,
+            queryHits: [:],
+            appSessionKey: item.appSessionKey
+        )
+        downgradeIfNeeded(&appRecord, for: item.appSessionKey)
+        appRecord.selectionCount += 1
+        appRecord.lastSelectedAt = selectedAt
+
+        if !normalizedQuery.isEmpty {
+            appRecord.queryHits[normalizedQuery, default: 0] += 1
+            trimQueries(in: &appRecord)
+        }
+        snapshot.appRecords[item.appMemoryKey] = appRecord
+
+        trimRecords(in: &snapshot)
+        trimAppRecords(in: &snapshot)
+        trimSessionRecords()
+        trimSessionTransitions()
+        cachedSnapshot = snapshot
+        save(snapshot)
     }
 
     private func score(for record: Record, query normalizedQuery: String) -> Int {
@@ -111,85 +263,13 @@ final class WindowSelectionMemory {
             score += relatedQueryBonus(record: record, query: normalizedQuery) / 2
         }
 
-        return decayedScore(score, lastSelectedAt: record.lastSelectedAt, horizonDays: 60)
+        let total = decayedScore(score, lastSelectedAt: record.lastSelectedAt, horizonDays: 60)
             + recencyBonus(lastSelectedAt: record.lastSelectedAt) / 2
-    }
-
-    func transitionScore(
-        from source: WindowItem?,
-        to target: WindowItem,
-        referenceTime: TimeInterval
-    ) -> Int {
-        guard let source, !source.representsSameWindow(as: target) else {
-            return 0
-        }
-
-        let key = Self.transitionKey(from: source.memoryKey, to: target.memoryKey)
-        let reverseKey = Self.transitionKey(from: target.memoryKey, to: source.memoryKey)
-        let transitions = snapshot().transitions
-
-        var totalScore = 0
-        if let record = transitions[key] {
-            totalScore += transitionScore(for: record, referenceTime: referenceTime)
-        }
-
-        if let reverseRecord = transitions[reverseKey] {
-            totalScore += transitionScore(for: reverseRecord, referenceTime: referenceTime) / 2
-        }
-
-        return totalScore
-    }
-
-    func recordSelection(_ item: WindowItem, query: String, from source: WindowItem? = nil) {
-        let normalizedQuery = Self.normalizedQuery(query)
-        var snapshot = snapshot()
-        var record = snapshot.records[item.memoryKey] ?? Record(
-            selectionCount: 0,
-            lastSelectedAt: 0,
-            queryHits: [:]
+        return scaledForCurrentSession(
+            total,
+            record: record,
+            currentAppSessionKey: item.appSessionKey
         )
-
-        record.selectionCount += 1
-        record.lastSelectedAt = Date().timeIntervalSince1970
-
-        if !normalizedQuery.isEmpty {
-            record.queryHits[normalizedQuery, default: 0] += 1
-            trimQueries(in: &record)
-        }
-
-        snapshot.records[item.memoryKey] = record
-
-        var appRecord = snapshot.appRecords[item.appMemoryKey] ?? Record(
-            selectionCount: 0,
-            lastSelectedAt: 0,
-            queryHits: [:]
-        )
-        appRecord.selectionCount += 1
-        appRecord.lastSelectedAt = record.lastSelectedAt
-
-        if !normalizedQuery.isEmpty {
-            appRecord.queryHits[normalizedQuery, default: 0] += 1
-            trimQueries(in: &appRecord)
-        }
-
-        snapshot.appRecords[item.appMemoryKey] = appRecord
-
-        if let source, !source.representsSameWindow(as: item) {
-            let transitionKey = Self.transitionKey(from: source.memoryKey, to: item.memoryKey)
-            var transition = snapshot.transitions[transitionKey] ?? TransitionRecord(
-                selectionCount: 0,
-                lastSelectedAt: 0
-            )
-            transition.selectionCount += 1
-            transition.lastSelectedAt = record.lastSelectedAt
-            snapshot.transitions[transitionKey] = transition
-        }
-
-        trimRecords(in: &snapshot)
-        trimAppRecords(in: &snapshot)
-        trimTransitions(in: &snapshot)
-        cachedSnapshot = snapshot
-        save(snapshot)
     }
 
     private func snapshot() -> Snapshot {
@@ -197,19 +277,15 @@ final class WindowSelectionMemory {
             return cachedSnapshot
         }
 
-        if let data = UserDefaults.standard.data(forKey: DefaultsKey.snapshot),
-           let snapshot = try? JSONDecoder().decode(Snapshot.self, from: data) {
-            cachedSnapshot = snapshot
-            return snapshot
+        for key in [DefaultsKey.snapshot, DefaultsKey.legacySnapshot, DefaultsKey.oldestSnapshot] {
+            if let data = UserDefaults.standard.data(forKey: key),
+               let snapshot = try? JSONDecoder().decode(Snapshot.self, from: data) {
+                cachedSnapshot = snapshot
+                return snapshot
+            }
         }
 
-        guard let data = UserDefaults.standard.data(forKey: DefaultsKey.legacySnapshot),
-              let snapshot = try? JSONDecoder().decode(Snapshot.self, from: data) else {
-            let snapshot = Snapshot()
-            cachedSnapshot = snapshot
-            return snapshot
-        }
-
+        let snapshot = Snapshot()
         cachedSnapshot = snapshot
         return snapshot
     }
@@ -222,6 +298,32 @@ final class WindowSelectionMemory {
         UserDefaults.standard.set(data, forKey: DefaultsKey.snapshot)
     }
 
+    private func downgradeIfNeeded(_ record: inout Record, for appSessionKey: String) {
+        guard record.appSessionKey != appSessionKey else {
+            return
+        }
+
+        record.selectionCount = Int(Double(record.selectionCount) * previousSessionMultiplier)
+        record.queryHits = record.queryHits.reduce(into: [:]) { result, entry in
+            let downgradedCount = Int(Double(entry.value) * previousSessionMultiplier)
+            if downgradedCount > 0 {
+                result[entry.key] = downgradedCount
+            }
+        }
+        record.appSessionKey = appSessionKey
+    }
+
+    private func scaledForCurrentSession(
+        _ score: Int,
+        record: Record,
+        currentAppSessionKey: String
+    ) -> Int {
+        guard record.appSessionKey != currentAppSessionKey else {
+            return score
+        }
+        return Int(Double(score) * previousSessionMultiplier)
+    }
+
     private func recencyBonus(lastSelectedAt: TimeInterval) -> Int {
         let age = Date().timeIntervalSince1970 - lastSelectedAt
         let ageDays = max(0, age / 86_400)
@@ -230,36 +332,6 @@ final class WindowSelectionMemory {
         }
 
         return Int(240 * (1 - ageDays / 30))
-    }
-
-    private func transitionRecencyBonus(
-        lastSelectedAt: TimeInterval,
-        referenceTime: TimeInterval
-    ) -> Int {
-        let age = referenceTime - lastSelectedAt
-        let ageDays = max(0, age / 86_400)
-        guard ageDays < 14 else {
-            return 0
-        }
-
-        return Int(2_000 * (1 - ageDays / 14))
-    }
-
-    private func transitionScore(
-        for transition: TransitionRecord,
-        referenceTime: TimeInterval
-    ) -> Int {
-        var score = min(3_000, transition.selectionCount * 750)
-        score += transitionRecencyBonus(
-            lastSelectedAt: transition.lastSelectedAt,
-            referenceTime: referenceTime
-        )
-        return decayedScore(
-            score,
-            lastSelectedAt: transition.lastSelectedAt,
-            horizonDays: 30,
-            referenceTime: referenceTime
-        )
     }
 
     private func decayedScore(
@@ -333,23 +405,43 @@ final class WindowSelectionMemory {
         }
     }
 
-    private func trimTransitions(in snapshot: inout Snapshot) {
-        guard snapshot.transitions.count > maxTransitions else {
+    private func trimSessionRecords() {
+        guard sessionRecords.count > maxSessionRecords else {
             return
         }
 
-        let keysToRemove = snapshot.transitions
+        let keysToRemove = sessionRecords
             .sorted { lhs, rhs in
                 if lhs.value.lastSelectedAt != rhs.value.lastSelectedAt {
                     return lhs.value.lastSelectedAt < rhs.value.lastSelectedAt
                 }
                 return lhs.value.selectionCount < rhs.value.selectionCount
             }
-            .prefix(snapshot.transitions.count - maxTransitions)
+            .prefix(sessionRecords.count - maxSessionRecords)
             .map(\.key)
 
         for key in keysToRemove {
-            snapshot.transitions.removeValue(forKey: key)
+            sessionRecords.removeValue(forKey: key)
+        }
+    }
+
+    private func trimSessionTransitions() {
+        guard sessionTransitions.count > maxSessionTransitions else {
+            return
+        }
+
+        let keysToRemove = sessionTransitions
+            .sorted { lhs, rhs in
+                if lhs.value.lastSelectedAt != rhs.value.lastSelectedAt {
+                    return lhs.value.lastSelectedAt < rhs.value.lastSelectedAt
+                }
+                return lhs.value.selectionCount < rhs.value.selectionCount
+            }
+            .prefix(sessionTransitions.count - maxSessionTransitions)
+            .map(\.key)
+
+        for key in keysToRemove {
+            sessionTransitions.removeValue(forKey: key)
         }
     }
 

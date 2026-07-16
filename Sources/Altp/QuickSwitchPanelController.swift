@@ -4,8 +4,8 @@ import CoreGraphics
 private enum QuickSwitchLayout {
     static let itemWidth: CGFloat = 168
     static let itemHeight: CGFloat = 142
-    static let itemSpacing: CGFloat = 10
-    static let horizontalInset: CGFloat = 12
+    static let itemSpacing: CGFloat = 6
+    static let horizontalInset: CGFloat = 8
     static let verticalInset: CGFloat = 10
     static let maximumVisibleItems = 7
 }

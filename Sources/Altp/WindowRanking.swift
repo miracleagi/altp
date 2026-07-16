@@ -54,18 +54,36 @@ enum WindowRanking {
         sourceWindow: WindowItem?,
         referenceTime: TimeInterval = Date().timeIntervalSince1970
     ) -> Bool {
-        let lhsTransitionScore = WindowSelectionMemory.shared.transitionScore(
+        let lhsTransitionRank = WindowSelectionMemory.shared.transitionRank(
             from: sourceWindow,
             to: lhs,
             referenceTime: referenceTime
         )
-        let rhsTransitionScore = WindowSelectionMemory.shared.transitionScore(
+        let rhsTransitionRank = WindowSelectionMemory.shared.transitionRank(
             from: sourceWindow,
             to: rhs,
             referenceTime: referenceTime
         )
-        if lhsTransitionScore != rhsTransitionScore {
-            return lhsTransitionScore > rhsTransitionScore
+        if lhsTransitionRank.lastSelectedAt != rhsTransitionRank.lastSelectedAt {
+            return lhsTransitionRank.lastSelectedAt > rhsTransitionRank.lastSelectedAt
+        }
+        if lhsTransitionRank.selectionCount != rhsTransitionRank.selectionCount {
+            return lhsTransitionRank.selectionCount > rhsTransitionRank.selectionCount
+        }
+
+        let lhsSessionRank = WindowSelectionMemory.shared.sessionRank(
+            for: lhs,
+            referenceTime: referenceTime
+        )
+        let rhsSessionRank = WindowSelectionMemory.shared.sessionRank(
+            for: rhs,
+            referenceTime: referenceTime
+        )
+        if lhsSessionRank.lastSelectedAt != rhsSessionRank.lastSelectedAt {
+            return lhsSessionRank.lastSelectedAt > rhsSessionRank.lastSelectedAt
+        }
+        if lhsSessionRank.selectionCount != rhsSessionRank.selectionCount {
+            return lhsSessionRank.selectionCount > rhsSessionRank.selectionCount
         }
 
         let lhsUsageScore = WindowSelectionMemory.shared.rankingScore(
