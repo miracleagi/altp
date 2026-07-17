@@ -4,14 +4,14 @@ import ApplicationServices
 enum WindowRanking {
     static func currentWindow(in items: [WindowItem]) -> WindowItem? {
         guard let frontmostApp = NSWorkspace.shared.frontmostApplication else {
-            return items.first
+            return nil
         }
 
         let frontmostItems = items.filter { item in
             item.app.processIdentifier == frontmostApp.processIdentifier && !item.isMinimized
         }
         guard !frontmostItems.isEmpty else {
-            return items.first
+            return nil
         }
 
         let axApp = AXUIElementCreateApplication(frontmostApp.processIdentifier)
@@ -54,48 +54,32 @@ enum WindowRanking {
         sourceWindow: WindowItem?,
         referenceTime: TimeInterval = Date().timeIntervalSince1970
     ) -> Bool {
-        let lhsTransitionRank = WindowSelectionMemory.shared.transitionRank(
-            from: sourceWindow,
-            to: lhs,
-            referenceTime: referenceTime
-        )
-        let rhsTransitionRank = WindowSelectionMemory.shared.transitionRank(
-            from: sourceWindow,
-            to: rhs,
-            referenceTime: referenceTime
-        )
-        if lhsTransitionRank.lastSelectedAt != rhsTransitionRank.lastSelectedAt {
-            return lhsTransitionRank.lastSelectedAt > rhsTransitionRank.lastSelectedAt
-        }
-        if lhsTransitionRank.selectionCount != rhsTransitionRank.selectionCount {
-            return lhsTransitionRank.selectionCount > rhsTransitionRank.selectionCount
-        }
-
         let lhsSessionRank = WindowSelectionMemory.shared.sessionRank(
             for: lhs,
+            from: sourceWindow,
             referenceTime: referenceTime
         )
         let rhsSessionRank = WindowSelectionMemory.shared.sessionRank(
             for: rhs,
+            from: sourceWindow,
             referenceTime: referenceTime
         )
-        if lhsSessionRank.lastSelectedAt != rhsSessionRank.lastSelectedAt {
-            return lhsSessionRank.lastSelectedAt > rhsSessionRank.lastSelectedAt
-        }
-        if lhsSessionRank.selectionCount != rhsSessionRank.selectionCount {
-            return lhsSessionRank.selectionCount > rhsSessionRank.selectionCount
-        }
-
-        let lhsUsageScore = WindowSelectionMemory.shared.rankingScore(
+        let lhsPersistentRank = WindowSelectionMemory.shared.persistentRank(
             for: lhs,
             referenceTime: referenceTime
         )
-        let rhsUsageScore = WindowSelectionMemory.shared.rankingScore(
+        let rhsPersistentRank = WindowSelectionMemory.shared.persistentRank(
             for: rhs,
             referenceTime: referenceTime
         )
-        if lhsUsageScore != rhsUsageScore {
-            return lhsUsageScore > rhsUsageScore
+        if let preference = WindowRankingPolicy.preference(
+            lhsSession: lhsSessionRank,
+            rhsSession: rhsSessionRank,
+            lhsPersistent: lhsPersistentRank,
+            rhsPersistent: rhsPersistentRank,
+            sameApplication: lhs.appMemoryKey == rhs.appMemoryKey
+        ) {
+            return preference
         }
 
         if lhs.hasMeaningfulTitle != rhs.hasMeaningfulTitle {

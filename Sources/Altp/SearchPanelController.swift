@@ -59,6 +59,9 @@ final class SearchPanelController: NSObject {
         if AccessibilityPermission.isTrusted {
             allWindows = catalog.allWindows()
             sourceWindow = WindowRanking.currentWindow(in: allWindows)
+            if let sourceWindow {
+                WindowSelectionMemory.shared.recordObservation(sourceWindow)
+            }
         } else {
             allWindows = []
             sourceWindow = nil
@@ -310,6 +313,12 @@ final class SearchPanelController: NSObject {
 
         if filteredWindows.isEmpty {
             tableView.deselectAll(nil)
+        } else if query.isEmpty,
+                  let sourceWindow,
+                  let nextWindowIndex = filteredWindows.firstIndex(where: {
+                      !$0.representsSameWindow(as: sourceWindow)
+                  }) {
+            selectRow(nextWindowIndex)
         } else {
             selectRow(0)
         }

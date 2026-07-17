@@ -6,6 +6,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let settingsArgument = "--settings"
     private let aboutArgument = "--about"
     private let windowCatalog = WindowCatalog()
+    private lazy var windowActivityObserver = WindowActivityObserver(catalog: windowCatalog)
     private lazy var searchPanelController = SearchPanelController(catalog: windowCatalog)
     private var quickSwitchPanelController: QuickSwitchPanelController?
     private var searchHotKeyManager: HotKeyManager?
@@ -24,6 +25,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.accessory)
         setupStatusItem()
         setupHotKeys()
+        windowActivityObserver.start()
 
         if ProcessInfo.processInfo.arguments.contains(aboutArgument) {
             showAbout()
@@ -32,6 +34,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } else if !ProcessInfo.processInfo.arguments.contains(launchAtLoginArgument) {
             searchPanelController.show()
         }
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        windowActivityObserver.stop()
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {

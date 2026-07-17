@@ -76,6 +76,9 @@ final class QuickSwitchPanelController: NSObject {
 
         let allWindows = catalog.allWindows()
         sourceWindow = WindowRanking.currentWindow(in: allWindows)
+        if let sourceWindow {
+            WindowSelectionMemory.shared.recordObservation(sourceWindow)
+        }
         shouldActivateOnModifierRelease = activateOnModifierRelease
         windows = WindowRanking.sortedForEmptyQuery(allWindows, sourceWindow: sourceWindow)
         collectionView.selectionIndexPaths = []
