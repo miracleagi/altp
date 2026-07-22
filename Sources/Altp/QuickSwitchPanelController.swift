@@ -22,7 +22,7 @@ final class QuickSwitchPanelController: NSObject {
     init(catalog: WindowCatalog) {
         self.catalog = catalog
         self.panel = QuickSwitchPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 1_260, height: 162),
+            contentRect: NSRect(x: 0, y: 0, width: 1_100, height: 142),
             styleMask: [.borderless, .fullSizeContentView],
             backing: .buffered,
             defer: false
@@ -124,7 +124,7 @@ final class QuickSwitchPanelController: NSObject {
         effectView.blendingMode = .behindWindow
         effectView.state = .active
         effectView.wantsLayer = true
-        effectView.layer?.cornerRadius = 14
+        effectView.layer?.cornerRadius = 12
         effectView.layer?.masksToBounds = true
         panel.contentView = effectView
 
@@ -325,7 +325,7 @@ final class QuickSwitchPanelController: NSObject {
         let clipView = scrollView.contentView
         let visibleRect = clipView.documentVisibleRect
         let itemFrame = attributes.frame
-        let horizontalPadding: CGFloat = 12
+        let horizontalPadding: CGFloat = 6
         var targetX = visibleRect.origin.x
 
         if itemFrame.minX < visibleRect.minX + horizontalPadding {
@@ -561,7 +561,7 @@ private final class QuickSwitchWindowItem: NSCollectionViewItem {
         )
         let appBottomConstraint = appLabel.bottomAnchor.constraint(
             lessThanOrEqualTo: view.bottomAnchor,
-            constant: -layoutMetrics.horizontalInset
+            constant: -layoutMetrics.verticalInset
         )
         self.iconTopConstraint = iconTopConstraint
         self.iconWidthConstraint = iconWidthConstraint
@@ -599,7 +599,7 @@ private final class QuickSwitchWindowItem: NSCollectionViewItem {
         titleLeadingConstraint?.constant = layoutMetrics.contentSideInset
         titleTrailingConstraint?.constant = -layoutMetrics.contentSideInset
         titleTopConstraint?.constant = layoutMetrics.contentSideInset
-        appBottomConstraint?.constant = -layoutMetrics.horizontalInset
+        appBottomConstraint?.constant = -layoutMetrics.verticalInset
     }
 
     private func updateTitleLayout(for title: String) {

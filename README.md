@@ -106,7 +106,7 @@ build -> Developer ID signing with Hardened Runtime -> zip -> notarization -> st
 The final artifact is written to:
 
 ```text
-dist/release/Altp-0.1.10-macOS.zip
+dist/release/Altp-0.1.11-macOS.zip
 ```
 
 Verify Gatekeeper acceptance before publishing:
