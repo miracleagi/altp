@@ -11,7 +11,7 @@ Altp is a macOS window switcher. Press `Option + Space` to open a Spotlight-styl
 - Enumerates windows from running apps instead of switching only between apps.
 - Searches window titles, app names, and bundle identifiers. Chinese app names and window titles support pinyin search, so `feishu` can match `飞书`.
 - Shares ranking memory between search and quick switching. If you repeatedly switch between two windows, `Option + Tab` prioritizes the other recent window.
-- Filters hidden apps and internal window titles such as WatermarkWidget by default. Settings lets you edit excluded title rules and choose whether minimized windows are shown.
+- Filters hidden apps and narrowly verified compatibility windows by default. Settings lets you edit excluded title rules and choose whether minimized windows are shown.
 - Supports arrow-key navigation, Return to switch, and Escape to close.
 - Opens a horizontal quick switcher with `Option + Tab`; press Tab repeatedly to move the selection, then release Option or press Return to switch.
 - Restores minimized windows before focusing them.
@@ -106,7 +106,7 @@ build -> Developer ID signing with Hardened Runtime -> zip -> notarization -> st
 The final artifact is written to:
 
 ```text
-dist/release/Altp-0.1.6-macOS.zip
+dist/release/Altp-0.1.10-macOS.zip
 ```
 
 Verify Gatekeeper acceptance before publishing:

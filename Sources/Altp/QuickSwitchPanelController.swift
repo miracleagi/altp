@@ -1,19 +1,11 @@
 import AppKit
 import CoreGraphics
 
-private enum QuickSwitchLayout {
-    static let itemWidth: CGFloat = 168
-    static let itemHeight: CGFloat = 142
-    static let itemSpacing: CGFloat = 6
-    static let horizontalInset: CGFloat = 8
-    static let verticalInset: CGFloat = 10
-    static let maximumVisibleItems = 7
-}
-
 final class QuickSwitchPanelController: NSObject {
     private let catalog: WindowCatalog
     private let panel: QuickSwitchPanel
     private let collectionView = NSCollectionView()
+    private let flowLayout = NSCollectionViewFlowLayout()
     private let scrollView = NSScrollView()
     private let emptyLabel = NSTextField(labelWithString: "No windows")
     private var localEventMonitor: Any?
@@ -23,6 +15,9 @@ final class QuickSwitchPanelController: NSObject {
     private var sourceWindow: WindowItem?
     private var shouldActivateOnModifierRelease = false
     private var isActivatingSelection = false
+    private var layoutMetrics = QuickSwitchLayoutPolicy.metrics(
+        forVisibleWidth: QuickSwitchLayoutPolicy.referenceScreenWidth
+    )
 
     init(catalog: WindowCatalog) {
         self.catalog = catalog
@@ -53,6 +48,12 @@ final class QuickSwitchPanelController: NSObject {
         if panel.isVisible {
             shouldActivateOnModifierRelease = shouldActivateOnModifierRelease || activateOnModifierRelease
             startModifierReleasePollingIfNeeded()
+            if let screen = targetScreen() {
+                if updateLayout(for: screen) {
+                    collectionView.reloadData()
+                }
+                positionPanel(on: screen)
+            }
             moveSelection(delta: 1)
             return
         }
@@ -82,7 +83,6 @@ final class QuickSwitchPanelController: NSObject {
         shouldActivateOnModifierRelease = activateOnModifierRelease
         windows = WindowRanking.sortedForEmptyQuery(allWindows, sourceWindow: sourceWindow)
         collectionView.selectionIndexPaths = []
-        collectionView.reloadData()
         emptyLabel.isHidden = !windows.isEmpty
 
         guard !windows.isEmpty else {
@@ -90,7 +90,13 @@ final class QuickSwitchPanelController: NSObject {
             return
         }
 
-        positionPanel()
+        guard let screen = targetScreen() else {
+            NSSound.beep()
+            return
+        }
+        updateLayout(for: screen)
+        collectionView.reloadData()
+        positionPanel(on: screen)
         selectRow(defaultSelectionRow())
 
         panel.alphaValue = 1
@@ -122,22 +128,9 @@ final class QuickSwitchPanelController: NSObject {
         effectView.layer?.masksToBounds = true
         panel.contentView = effectView
 
-        let layout = NSCollectionViewFlowLayout()
-        layout.scrollDirection = .horizontal
-        layout.itemSize = NSSize(
-            width: QuickSwitchLayout.itemWidth,
-            height: QuickSwitchLayout.itemHeight
-        )
-        layout.minimumInteritemSpacing = QuickSwitchLayout.itemSpacing
-        layout.minimumLineSpacing = QuickSwitchLayout.itemSpacing
-        layout.sectionInset = NSEdgeInsets(
-            top: QuickSwitchLayout.verticalInset,
-            left: QuickSwitchLayout.horizontalInset,
-            bottom: QuickSwitchLayout.verticalInset,
-            right: QuickSwitchLayout.horizontalInset
-        )
-
-        collectionView.collectionViewLayout = layout
+        flowLayout.scrollDirection = .horizontal
+        collectionView.collectionViewLayout = flowLayout
+        applyLayoutMetrics()
         collectionView.backgroundColors = [.clear]
         collectionView.isSelectable = true
         collectionView.allowsMultipleSelection = false
@@ -232,26 +225,56 @@ final class QuickSwitchPanelController: NSObject {
         }
     }
 
-    private func positionPanel() {
-        let targetScreen = screenContainingMouse() ?? NSScreen.main ?? NSScreen.screens.first
-        guard let screen = targetScreen else {
-            return
-        }
-
+    private func positionPanel(on screen: NSScreen) {
         let visibleFrame = screen.visibleFrame
-        let visibleItems = min(max(windows.count, 1), QuickSwitchLayout.maximumVisibleItems)
-        let contentWidth = CGFloat(visibleItems) * QuickSwitchLayout.itemWidth
-            + CGFloat(max(visibleItems - 1, 0)) * QuickSwitchLayout.itemSpacing
-            + QuickSwitchLayout.horizontalInset * 2
-        let width = min(max(contentWidth, 240), visibleFrame.width - 48)
-        let contentHeight = QuickSwitchLayout.itemHeight + QuickSwitchLayout.verticalInset * 2
-        let height = min(contentHeight, visibleFrame.height - 96)
+        let panelSize = QuickSwitchLayoutPolicy.panelSize(
+            windowCount: windows.count,
+            visibleFrame: visibleFrame,
+            metrics: layoutMetrics
+        )
         let origin = NSPoint(
-            x: visibleFrame.midX - width / 2,
-            y: visibleFrame.midY - height / 2 + visibleFrame.height * 0.08
+            x: visibleFrame.midX - panelSize.width / 2,
+            y: visibleFrame.midY - panelSize.height / 2 + visibleFrame.height * 0.08
         )
 
-        panel.setFrame(NSRect(x: origin.x, y: origin.y, width: width, height: height), display: true)
+        panel.setFrame(
+            NSRect(origin: origin, size: panelSize),
+            display: true
+        )
+    }
+
+    private func targetScreen() -> NSScreen? {
+        screenContainingMouse() ?? NSScreen.main ?? NSScreen.screens.first
+    }
+
+    @discardableResult
+    private func updateLayout(for screen: NSScreen) -> Bool {
+        let updatedMetrics = QuickSwitchLayoutPolicy.metrics(
+            forVisibleWidth: screen.visibleFrame.width
+        )
+        guard updatedMetrics != layoutMetrics else {
+            return false
+        }
+
+        layoutMetrics = updatedMetrics
+        applyLayoutMetrics()
+        flowLayout.invalidateLayout()
+        return true
+    }
+
+    private func applyLayoutMetrics() {
+        flowLayout.itemSize = NSSize(
+            width: layoutMetrics.itemWidth,
+            height: layoutMetrics.itemHeight
+        )
+        flowLayout.minimumInteritemSpacing = layoutMetrics.itemSpacing
+        flowLayout.minimumLineSpacing = layoutMetrics.itemSpacing
+        flowLayout.sectionInset = NSEdgeInsets(
+            top: layoutMetrics.verticalInset,
+            left: layoutMetrics.horizontalInset,
+            bottom: layoutMetrics.verticalInset,
+            right: layoutMetrics.horizontalInset
+        )
     }
 
     private func screenContainingMouse() -> NSScreen? {
@@ -383,13 +406,13 @@ final class QuickSwitchPanelController: NSObject {
         let item = windows[row]
         let source = sourceWindow
         hide()
-        let result = catalog.activate(item)
-
-        if result == .success {
-            WindowSelectionMemory.shared.recordSelection(item, query: "", from: source)
-        } else {
-            NSLog("Altp quick switch activation failed with AXError \(result.rawValue)")
-            NSSound.beep()
+        catalog.activate(item) { result in
+            if result == .success {
+                WindowSelectionMemory.shared.recordSelection(item, query: "", from: source)
+            } else {
+                NSLog("Altp quick switch activation failed with AXError \(result.rawValue)")
+                NSSound.beep()
+            }
         }
     }
 
@@ -422,7 +445,10 @@ extension QuickSwitchPanelController: NSCollectionViewDataSource, NSCollectionVi
             return item
         }
 
-        windowItem.configure(with: windows[indexPath.item])
+        windowItem.configure(
+            with: windows[indexPath.item],
+            layoutMetrics: layoutMetrics
+        )
         return windowItem
     }
 }
@@ -450,7 +476,16 @@ private final class QuickSwitchWindowItem: NSCollectionViewItem {
     private let titleLabel = NSTextField(labelWithString: "")
     private let appLabel = NSTextField(labelWithString: "")
     private var iconTopConstraint: NSLayoutConstraint?
+    private var iconWidthConstraint: NSLayoutConstraint?
+    private var iconHeightConstraint: NSLayoutConstraint?
     private var titleHeightConstraint: NSLayoutConstraint?
+    private var titleLeadingConstraint: NSLayoutConstraint?
+    private var titleTrailingConstraint: NSLayoutConstraint?
+    private var titleTopConstraint: NSLayoutConstraint?
+    private var appBottomConstraint: NSLayoutConstraint?
+    private var layoutMetrics = QuickSwitchLayoutPolicy.metrics(
+        forVisibleWidth: QuickSwitchLayoutPolicy.referenceScreenWidth
+    )
 
     override var isSelected: Bool {
         didSet {
@@ -463,7 +498,12 @@ private final class QuickSwitchWindowItem: NSCollectionViewItem {
         buildInterface()
     }
 
-    func configure(with item: WindowItem) {
+    func configure(
+        with item: WindowItem,
+        layoutMetrics: QuickSwitchLayoutMetrics
+    ) {
+        self.layoutMetrics = layoutMetrics
+        applyLayoutMetrics()
         iconView.image = item.icon
         titleLabel.stringValue = item.displayTitle
         titleLabel.toolTip = item.displayTitle
@@ -474,13 +514,13 @@ private final class QuickSwitchWindowItem: NSCollectionViewItem {
 
     private func buildInterface() {
         view.wantsLayer = true
-        view.layer?.cornerRadius = 10
+        view.layer?.cornerRadius = layoutMetrics.cardCornerRadius
 
         iconView.imageScaling = .scaleProportionallyUpOrDown
         iconView.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(iconView)
 
-        titleLabel.font = .systemFont(ofSize: 13, weight: .medium)
+        titleLabel.font = .systemFont(ofSize: layoutMetrics.titleFontSize, weight: .medium)
         titleLabel.textColor = .labelColor
         titleLabel.lineBreakMode = .byTruncatingMiddle
         titleLabel.maximumNumberOfLines = 2
@@ -490,7 +530,7 @@ private final class QuickSwitchWindowItem: NSCollectionViewItem {
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(titleLabel)
 
-        appLabel.font = .systemFont(ofSize: 11)
+        appLabel.font = .systemFont(ofSize: layoutMetrics.appFontSize)
         appLabel.textColor = .secondaryLabelColor
         appLabel.lineBreakMode = .byTruncatingTail
         appLabel.maximumNumberOfLines = 1
@@ -498,38 +538,81 @@ private final class QuickSwitchWindowItem: NSCollectionViewItem {
         appLabel.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(appLabel)
 
-        let iconTopConstraint = iconView.topAnchor.constraint(equalTo: view.topAnchor, constant: 20)
-        let titleHeightConstraint = titleLabel.heightAnchor.constraint(equalToConstant: 16)
+        let iconTopConstraint = iconView.topAnchor.constraint(
+            equalTo: view.topAnchor,
+            constant: layoutMetrics.iconTopSingleLine
+        )
+        let iconWidthConstraint = iconView.widthAnchor.constraint(equalToConstant: layoutMetrics.iconSize)
+        let iconHeightConstraint = iconView.heightAnchor.constraint(equalToConstant: layoutMetrics.iconSize)
+        let titleHeightConstraint = titleLabel.heightAnchor.constraint(
+            equalToConstant: layoutMetrics.titleLineHeight
+        )
+        let titleLeadingConstraint = titleLabel.leadingAnchor.constraint(
+            equalTo: view.leadingAnchor,
+            constant: layoutMetrics.contentSideInset
+        )
+        let titleTrailingConstraint = titleLabel.trailingAnchor.constraint(
+            equalTo: view.trailingAnchor,
+            constant: -layoutMetrics.contentSideInset
+        )
+        let titleTopConstraint = titleLabel.topAnchor.constraint(
+            equalTo: iconView.bottomAnchor,
+            constant: layoutMetrics.contentSideInset
+        )
+        let appBottomConstraint = appLabel.bottomAnchor.constraint(
+            lessThanOrEqualTo: view.bottomAnchor,
+            constant: -layoutMetrics.horizontalInset
+        )
         self.iconTopConstraint = iconTopConstraint
+        self.iconWidthConstraint = iconWidthConstraint
+        self.iconHeightConstraint = iconHeightConstraint
         self.titleHeightConstraint = titleHeightConstraint
+        self.titleLeadingConstraint = titleLeadingConstraint
+        self.titleTrailingConstraint = titleTrailingConstraint
+        self.titleTopConstraint = titleTopConstraint
+        self.appBottomConstraint = appBottomConstraint
 
         NSLayoutConstraint.activate([
             iconView.centerXAnchor.constraint(equalTo: view.centerXAnchor),
             iconTopConstraint,
-            iconView.widthAnchor.constraint(equalToConstant: 64),
-            iconView.heightAnchor.constraint(equalToConstant: 64),
+            iconWidthConstraint,
+            iconHeightConstraint,
 
-            titleLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 6),
-            titleLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -6),
-            titleLabel.topAnchor.constraint(equalTo: iconView.bottomAnchor, constant: 6),
+            titleLeadingConstraint,
+            titleTrailingConstraint,
+            titleTopConstraint,
             titleHeightConstraint,
 
             appLabel.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
             appLabel.trailingAnchor.constraint(equalTo: titleLabel.trailingAnchor),
             appLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 1),
-            appLabel.bottomAnchor.constraint(lessThanOrEqualTo: view.bottomAnchor, constant: -8)
+            appBottomConstraint
         ])
     }
 
+    private func applyLayoutMetrics() {
+        view.layer?.cornerRadius = layoutMetrics.cardCornerRadius
+        titleLabel.font = .systemFont(ofSize: layoutMetrics.titleFontSize, weight: .medium)
+        appLabel.font = .systemFont(ofSize: layoutMetrics.appFontSize)
+        iconWidthConstraint?.constant = layoutMetrics.iconSize
+        iconHeightConstraint?.constant = layoutMetrics.iconSize
+        titleLeadingConstraint?.constant = layoutMetrics.contentSideInset
+        titleTrailingConstraint?.constant = -layoutMetrics.contentSideInset
+        titleTopConstraint?.constant = layoutMetrics.contentSideInset
+        appBottomConstraint?.constant = -layoutMetrics.horizontalInset
+    }
+
     private func updateTitleLayout(for title: String) {
-        let availableWidth = QuickSwitchLayout.itemWidth - 12
+        let availableWidth = layoutMetrics.itemWidth - layoutMetrics.contentSideInset * 2
         let measuredWidth = (title as NSString).size(
             withAttributes: [.font: titleLabel.font as Any]
         ).width
         let usesTwoLines = measuredWidth > availableWidth
 
-        titleHeightConstraint?.constant = usesTwoLines ? 32 : 16
-        iconTopConstraint?.constant = usesTwoLines ? 12 : 20
+        titleHeightConstraint?.constant = layoutMetrics.titleLineHeight * (usesTwoLines ? 2 : 1)
+        iconTopConstraint?.constant = usesTwoLines
+            ? layoutMetrics.iconTopTwoLines
+            : layoutMetrics.iconTopSingleLine
     }
 
     private func updateSelectionAppearance() {

@@ -14,40 +14,113 @@ struct WindowPersistentRank: Equatable {
     let windowScore: Double
 }
 
+struct WindowApplicationFallbackCandidate: Equatable {
+    let identifier: Int
+    let sessionScore: Double
+    let visualOrder: Int
+    let catalogIndex: Int
+}
+
+struct WindowSortKey: Equatable {
+    let totalScore: Double
+    let sessionScore: Double
+    let sessionInteractionCount: Int
+    let windowScore: Double
+    let applicationFallbackScore: Double
+    let hasMeaningfulTitle: Bool
+    let visualOrder: Int
+    let appName: String
+    let windowTitle: String
+    let sessionSortKey: UInt
+    let catalogIndex: Int
+}
+
 enum WindowRankingPolicy {
     static let previousSessionMultiplier = 0.2
     static let previousSessionSelectionCap = 3
-    static let persistentHalfLifeDays = 3.0
+    static let persistentHalfLifeDays = 1.0
+    static let sessionHalfLifeHours = 4.0
+    static let sessionHorizonHours = 24.0
     static let maximumPersistentAppScore = 40.0
     static let maximumPersistentWindowScore = 40.0
+    static let baseSessionScore = 100.0
 
-    static func preference(
-        lhsSession: WindowSessionRank,
-        rhsSession: WindowSessionRank,
-        lhsPersistent: WindowPersistentRank,
-        rhsPersistent: WindowPersistentRank,
-        sameApplication: Bool
-    ) -> Bool? {
-        if lhsSession.lastUsedAt != rhsSession.lastUsedAt {
-            return lhsSession.lastUsedAt > rhsSession.lastUsedAt
+    static func sessionScore(
+        for rank: WindowSessionRank,
+        referenceTime: TimeInterval
+    ) -> Double {
+        guard rank.lastUsedAt > 0 else {
+            return 0
         }
 
-        if lhsSession.interactionCount != rhsSession.interactionCount {
-            return lhsSession.interactionCount > rhsSession.interactionCount
+        let ageSeconds = max(0, referenceTime - rank.lastUsedAt)
+        guard ageSeconds <= sessionHorizonHours * 3_600 else {
+            return 0
         }
 
-        // A stable window identity is useful inside one application, but must not
-        // give applications such as Cursor an extra cross-application score.
-        if sameApplication,
-           lhsPersistent.windowScore != rhsPersistent.windowScore {
-            return lhsPersistent.windowScore > rhsPersistent.windowScore
+        return decayedScore(
+            baseSessionScore,
+            lastUsedAt: rank.lastUsedAt,
+            halfLifeDays: sessionHalfLifeHours / 24,
+            referenceTime: referenceTime
+        )
+    }
+
+    static func applicationFallbackRepresentative(
+        candidates: [WindowApplicationFallbackCandidate],
+        hasWindowHistory: Bool
+    ) -> Int? {
+        guard !hasWindowHistory else {
+            return nil
         }
 
-        if lhsPersistent.appScore != rhsPersistent.appScore {
-            return lhsPersistent.appScore > rhsPersistent.appScore
+        return candidates.min { lhs, rhs in
+            if lhs.sessionScore != rhs.sessionScore {
+                return lhs.sessionScore > rhs.sessionScore
+            }
+            if lhs.visualOrder != rhs.visualOrder {
+                return lhs.visualOrder < rhs.visualOrder
+            }
+            return lhs.catalogIndex < rhs.catalogIndex
+        }?.identifier
+    }
+
+    static func prefers(_ lhs: WindowSortKey, over rhs: WindowSortKey) -> Bool {
+        if lhs.totalScore != rhs.totalScore {
+            return lhs.totalScore > rhs.totalScore
+        }
+        if lhs.sessionScore != rhs.sessionScore {
+            return lhs.sessionScore > rhs.sessionScore
+        }
+        if lhs.sessionInteractionCount != rhs.sessionInteractionCount {
+            return lhs.sessionInteractionCount > rhs.sessionInteractionCount
+        }
+        if lhs.windowScore != rhs.windowScore {
+            return lhs.windowScore > rhs.windowScore
+        }
+        if lhs.applicationFallbackScore != rhs.applicationFallbackScore {
+            return lhs.applicationFallbackScore > rhs.applicationFallbackScore
+        }
+        if lhs.hasMeaningfulTitle != rhs.hasMeaningfulTitle {
+            return lhs.hasMeaningfulTitle
+        }
+        if lhs.visualOrder != rhs.visualOrder {
+            return lhs.visualOrder < rhs.visualOrder
         }
 
-        return nil
+        let appComparison = lhs.appName.localizedCaseInsensitiveCompare(rhs.appName)
+        if appComparison != .orderedSame {
+            return appComparison == .orderedAscending
+        }
+
+        let titleComparison = lhs.windowTitle.localizedCaseInsensitiveCompare(rhs.windowTitle)
+        if titleComparison != .orderedSame {
+            return titleComparison == .orderedAscending
+        }
+        if lhs.sessionSortKey != rhs.sessionSortKey {
+            return lhs.sessionSortKey < rhs.sessionSortKey
+        }
+        return lhs.catalogIndex < rhs.catalogIndex
     }
 
     static func persistentScore(
@@ -64,7 +137,10 @@ enum WindowRankingPolicy {
             return 0
         }
 
-        let rawScore = min(maximumScore, Double(selectionCount) * 2)
+        let rawScore = min(
+            maximumScore,
+            log2(Double(selectionCount) + 1) * 6
+        )
         return decayedScore(
             rawScore,
             lastUsedAt: lastSelectedAt,

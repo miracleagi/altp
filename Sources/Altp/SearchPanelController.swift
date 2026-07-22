@@ -274,38 +274,30 @@ final class SearchPanelController: NSObject {
     private func applyFilter() {
         let query = SearchText.normalize(searchField.stringValue)
         let tokens = SearchText.tokens(in: query)
-        let rankingReferenceTime = Date().timeIntervalSince1970
-
-        let rankedWindows = allWindows
-            .compactMap { item -> (WindowItem, Int)? in
+        let rankedWindows: [(item: WindowItem, score: Int)] = allWindows
+            .compactMap { item -> (item: WindowItem, score: Int)? in
                 if !tokens.isEmpty {
                     guard tokens.allSatisfy({ item.searchableText.contains($0) }) else {
                         return nil
                     }
                 }
 
-                return (item, score(item: item, tokens: tokens, query: query))
+                return (
+                    item: item,
+                    score: score(item: item, tokens: tokens, query: query)
+                )
             }
 
         if tokens.isEmpty {
             filteredWindows = WindowRanking.sortedForEmptyQuery(
-                rankedWindows.map(\.0),
+                rankedWindows.map(\.item),
                 sourceWindow: sourceWindow
             )
         } else {
-            filteredWindows = rankedWindows
-                .sorted { lhs, rhs in
-                    if lhs.1 != rhs.1 {
-                        return lhs.1 > rhs.1
-                    }
-                    return WindowRanking.isPreferred(
-                        lhs.0,
-                        over: rhs.0,
-                        sourceWindow: sourceWindow,
-                        referenceTime: rankingReferenceTime
-                    )
-                }
-                .map(\.0)
+            filteredWindows = WindowRanking.sortedForQuery(
+                rankedWindows,
+                sourceWindow: sourceWindow
+            )
         }
 
         tableView.reloadData()
@@ -348,7 +340,7 @@ final class SearchPanelController: NSObject {
             score -= 50
         }
 
-        score += WindowSelectionMemory.shared.score(for: item, query: query)
+        score += WindowSelectionMemory.shared.queryBonus(for: item, query: query)
         return score
     }
 
@@ -379,16 +371,18 @@ final class SearchPanelController: NSObject {
 
         let item = filteredWindows[row]
         let source = sourceWindow
+        let query = searchField.stringValue
         hide()
-        let result = catalog.activate(item)
-        if result == .success {
-            WindowSelectionMemory.shared.recordSelection(
-                item,
-                query: searchField.stringValue,
-                from: source
-            )
-        } else {
-            NSSound.beep()
+        catalog.activate(item) { result in
+            if result == .success {
+                WindowSelectionMemory.shared.recordSelection(
+                    item,
+                    query: query,
+                    from: source
+                )
+            } else {
+                NSSound.beep()
+            }
         }
     }
 

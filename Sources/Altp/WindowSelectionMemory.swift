@@ -55,21 +55,23 @@ final class WindowSelectionMemory {
     private var sessionRecords: [String: SessionRecord] = [:]
     private var sessionTransitions: [String: TransitionRecord] = [:]
 
-    func score(for item: WindowItem, query: String) -> Int {
+    func queryBonus(for item: WindowItem, query: String) -> Int {
         let normalizedQuery = Self.normalizedQuery(query)
-        let snapshot = snapshot()
-        var total = appScore(for: item, query: normalizedQuery, snapshot: snapshot)
-
-        if let key = item.persistentMemoryKey,
-           let record = snapshot.records[key] {
-            total += scaledForCurrentSession(
-                score(for: record, query: normalizedQuery),
-                record: record,
-                currentAppSessionKey: item.appSessionKey
-            )
+        guard !normalizedQuery.isEmpty else {
+            return 0
         }
 
-        return total
+        let snapshot = snapshot()
+        guard let key = item.persistentMemoryKey,
+              let record = snapshot.records[key] else {
+            return 0
+        }
+
+        return scaledForCurrentSession(
+            queryBonus(for: record, query: normalizedQuery),
+            record: record,
+            currentAppSessionKey: item.appSessionKey
+        )
     }
 
     func persistentRank(for item: WindowItem, referenceTime: TimeInterval) -> WindowPersistentRank {
@@ -110,7 +112,7 @@ final class WindowSelectionMemory {
     func sessionRank(
         for item: WindowItem,
         from source: WindowItem?,
-        referenceTime _: TimeInterval
+        referenceTime: TimeInterval
     ) -> WindowSessionRank {
         let record = sessionRecords[item.sessionMemoryKey]
         var lastUsedAt = record?.lastUsedAt ?? 0
@@ -130,10 +132,17 @@ final class WindowSelectionMemory {
             interactionCount += transitions.reduce(0) { $0 + $1.selectionCount }
         }
 
-        return WindowSessionRank(
+        let rank = WindowSessionRank(
             lastUsedAt: lastUsedAt,
             interactionCount: interactionCount
         )
+        guard WindowRankingPolicy.sessionScore(
+            for: rank,
+            referenceTime: referenceTime
+        ) > 0 else {
+            return .none
+        }
+        return rank
     }
 
     func recordObservation(
@@ -210,45 +219,16 @@ final class WindowSelectionMemory {
         save(snapshot)
     }
 
-    private func score(for record: Record, query normalizedQuery: String) -> Int {
-        var score = min(40, record.selectionCount * 2)
-
-        if !normalizedQuery.isEmpty {
-            score += min(120, (record.queryHits[normalizedQuery] ?? 0) * 30)
-            score += relatedQueryBonus(record: record, query: normalizedQuery)
-        }
+    private func queryBonus(for record: Record, query normalizedQuery: String) -> Int {
+        let score = min(120, (record.queryHits[normalizedQuery] ?? 0) * 30)
+            + relatedQueryBonus(record: record, query: normalizedQuery)
 
         return Int(WindowRankingPolicy.decayedScore(
             Double(score),
             lastUsedAt: record.lastSelectedAt,
             halfLifeDays: WindowRankingPolicy.persistentHalfLifeDays,
             referenceTime: Date().timeIntervalSince1970
-        )) + recencyBonus(lastSelectedAt: record.lastSelectedAt, maximumScore: 20)
-    }
-
-    private func appScore(for item: WindowItem, query normalizedQuery: String, snapshot: Snapshot) -> Int {
-        guard let record = snapshot.appRecords[item.appMemoryKey] else {
-            return 0
-        }
-
-        var score = min(20, record.selectionCount)
-
-        if !normalizedQuery.isEmpty {
-            score += min(60, (record.queryHits[normalizedQuery] ?? 0) * 15)
-            score += relatedQueryBonus(record: record, query: normalizedQuery) / 2
-        }
-
-        let total = Int(WindowRankingPolicy.decayedScore(
-            Double(score),
-            lastUsedAt: record.lastSelectedAt,
-            halfLifeDays: WindowRankingPolicy.persistentHalfLifeDays,
-            referenceTime: Date().timeIntervalSince1970
-        )) + recencyBonus(lastSelectedAt: record.lastSelectedAt, maximumScore: 10)
-        return scaledForCurrentSession(
-            total,
-            record: record,
-            currentAppSessionKey: item.appSessionKey
-        )
+        ))
     }
 
     private func snapshot() -> Snapshot {
@@ -312,15 +292,6 @@ final class WindowSelectionMemory {
         Int(Double(score) * sessionMultiplier(
             for: record,
             currentAppSessionKey: currentAppSessionKey
-        ))
-    }
-
-    private func recencyBonus(lastSelectedAt: TimeInterval, maximumScore: Double) -> Int {
-        Int(WindowRankingPolicy.decayedScore(
-            maximumScore,
-            lastUsedAt: lastSelectedAt,
-            halfLifeDays: 1,
-            referenceTime: Date().timeIntervalSince1970
         ))
     }
 

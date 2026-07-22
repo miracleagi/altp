@@ -49,9 +49,7 @@ struct KeyboardShortcut: Equatable {
 }
 
 enum AppSettings {
-    static let defaultExcludedWindowTitlePatterns = [
-        "WatermarkWidget"
-    ]
+    static let defaultExcludedWindowTitlePatterns: [String] = []
 
     private enum Key {
         static let shortcutKeyCode = "shortcut.keyCode"

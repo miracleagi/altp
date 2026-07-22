@@ -17,6 +17,7 @@ final class WindowItem: NSObject {
     let order: Int
     let catalogIndex: Int
     let sessionSortKey: CFHashCode
+    let fallbackKind: WindowFallbackKind?
 
     init(
         app: NSRunningApplication,
@@ -32,7 +33,8 @@ final class WindowItem: NSObject {
         identifier: String,
         frame: CGRect?,
         order: Int,
-        catalogIndex: Int
+        catalogIndex: Int,
+        fallbackKind: WindowFallbackKind? = nil
     ) {
         self.app = app
         self.axWindow = axWindow
@@ -49,6 +51,7 @@ final class WindowItem: NSObject {
         self.order = order
         self.catalogIndex = catalogIndex
         self.sessionSortKey = CFHash(axWindow)
+        self.fallbackKind = fallbackKind
     }
 
     var displayTitle: String {
@@ -192,7 +195,8 @@ final class WindowCatalog {
 
         let showMinimizedWindows = AppSettings.showMinimizedWindows
         let excludedTitlePatterns = AppSettings.excludedWindowTitlePatterns.map(normalizedIdentityPart)
-        let visibleOrder = WindowOrdering.snapshot()
+        let windowServerSnapshot = WindowOrdering.snapshot()
+        let visibleOrder = windowServerSnapshot.visibleOrder
         let currentPID = ProcessInfo.processInfo.processIdentifier
         let apps = NSWorkspace.shared.runningApplications
             .filter { app in
@@ -206,9 +210,8 @@ final class WindowCatalog {
 
         for (appIndex, app) in apps.enumerated() {
             let axApp = AXUIElementCreateApplication(app.processIdentifier)
-            guard let windows = copyAttribute(axApp, kAXWindowsAttribute as CFString) as? [AXUIElement] else {
-                continue
-            }
+            let windows = copyAttribute(axApp, kAXWindowsAttribute as CFString) as? [AXUIElement] ?? []
+            var hasDiscoverableAXWindow = false
 
             for (windowIndex, window) in windows.enumerated() {
                 let role = axString(window, kAXRoleAttribute as CFString) ?? ""
@@ -225,7 +228,7 @@ final class WindowCatalog {
                 let isHidden = app.isHidden
                 let appName = app.localizedName ?? app.bundleIdentifier ?? "Unknown App"
 
-                if shouldExcludeUntitledAuxiliaryWindow(
+                if WindowCompatibilityRules.shouldExcludeWindow(
                     appName: appName,
                     bundleIdentifier: app.bundleIdentifier,
                     title: title
@@ -237,6 +240,8 @@ final class WindowCatalog {
                    frame?.isEmpty != false {
                     continue
                 }
+
+                hasDiscoverableAXWindow = true
 
                 if isHidden {
                     continue
@@ -272,9 +277,50 @@ final class WindowCatalog {
                     catalogIndex: catalogIndex
                 ))
             }
+
+            let fallbackCandidate = WindowFallbackPolicy.preferredCandidate(
+                from: windowServerSnapshot.fallbackCandidatesByPID[app.processIdentifier] ?? []
+            )
+            if WindowFallbackPolicy.shouldCreateApplicationFallback(
+                hasDiscoverableAXWindow: hasDiscoverableAXWindow,
+                isHidden: app.isHidden,
+                isTerminated: app.isTerminated,
+                candidate: fallbackCandidate
+            ), WindowCompatibilityRules.allowsApplicationFallback(
+                appName: app.localizedName ?? app.bundleIdentifier ?? "Unknown App",
+                bundleIdentifier: app.bundleIdentifier
+            ), let fallback = fallbackCandidate {
+                let appName = app.localizedName ?? app.bundleIdentifier ?? "Unknown App"
+                guard !isExcludedWindowTitle(
+                    appName,
+                    excludedTitlePatterns: excludedTitlePatterns
+                ) else {
+                    continue
+                }
+
+                let catalogIndex = nextCatalogIndex
+                nextCatalogIndex += 1
+                results.append(WindowItem(
+                    app: app,
+                    axWindow: axApp,
+                    title: appName,
+                    appName: appName,
+                    bundleIdentifier: app.bundleIdentifier,
+                    isMinimized: false,
+                    isHidden: false,
+                    role: "AXApplication",
+                    subrole: "AXApplicationFallback",
+                    document: "",
+                    identifier: "window-server-fallback",
+                    frame: fallback.frame,
+                    order: fallback.order,
+                    catalogIndex: catalogIndex,
+                    fallbackKind: WindowFallbackPolicy.kind(for: fallback)
+                ))
+            }
         }
 
-        return deduplicateFeishuMeetingWindows(results).sorted { lhs, rhs in
+        return deduplicateWindowsUsingCompatibilityRules(results).sorted { lhs, rhs in
             if lhs.order != rhs.order {
                 return lhs.order < rhs.order
             }
@@ -291,8 +337,10 @@ final class WindowCatalog {
         }
     }
 
-    @discardableResult
-    func activate(_ item: WindowItem) -> AXError {
+    func activate(
+        _ item: WindowItem,
+        completion: @escaping (AXError) -> Void
+    ) {
         if item.isMinimized {
             AXUIElementSetAttributeValue(
                 item.axWindow,
@@ -302,6 +350,16 @@ final class WindowCatalog {
         }
 
         item.app.unhide()
+        if let fallbackKind = item.fallbackKind {
+            item.app.activate(options: activationOptions(for: fallbackKind))
+            retryFallbackActivation(
+                item,
+                attemptIndex: 0,
+                completion: completion
+            )
+            return
+        }
+
         item.app.activate(options: [.activateIgnoringOtherApps])
 
         AXUIElementSetAttributeValue(
@@ -315,22 +373,155 @@ final class WindowCatalog {
             kCFBooleanTrue
         )
 
-        return AXUIElementPerformAction(item.axWindow, kAXRaiseAction as CFString)
+        completion(AXUIElementPerformAction(item.axWindow, kAXRaiseAction as CFString))
+    }
+
+    private func retryFallbackActivation(
+        _ item: WindowItem,
+        attemptIndex: Int,
+        completion: @escaping (AXError) -> Void
+    ) {
+        let retryDelays: [TimeInterval] = [0.08, 0.16, 0.28, 0.48]
+        guard attemptIndex < retryDelays.count else {
+            completion(.cannotComplete)
+            return
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + retryDelays[attemptIndex]) { [weak self] in
+            guard let self, !item.app.isTerminated else {
+                completion(.cannotComplete)
+                return
+            }
+
+            if let window = self.preferredAXWindow(for: item.app) {
+                if let fallbackKind = item.fallbackKind {
+                    item.app.activate(options: self.activationOptions(for: fallbackKind))
+                }
+                let mainResult = AXUIElementSetAttributeValue(
+                    window,
+                    kAXMainAttribute as CFString,
+                    kCFBooleanTrue
+                )
+                let focusResult = AXUIElementSetAttributeValue(
+                    window,
+                    kAXFocusedAttribute as CFString,
+                    kCFBooleanTrue
+                )
+                let raiseResult = AXUIElementPerformAction(window, kAXRaiseAction as CFString)
+                if raiseResult == .success || mainResult == .success || focusResult == .success {
+                    completion(.success)
+                    return
+                }
+            }
+
+            if attemptIndex == 0 {
+                self.requestApplicationReopen(item.app)
+            }
+            self.retryFallbackActivation(
+                item,
+                attemptIndex: attemptIndex + 1,
+                completion: completion
+            )
+        }
+    }
+
+    private func activationOptions(
+        for fallbackKind: WindowFallbackKind
+    ) -> NSApplication.ActivationOptions {
+        switch fallbackKind {
+        case .onScreenWindowServer:
+            return [.activateIgnoringOtherApps]
+        case .crossSpaceWindowServer:
+            return [.activateAllWindows, .activateIgnoringOtherApps]
+        }
+    }
+
+    private func preferredAXWindow(for app: NSRunningApplication) -> AXUIElement? {
+        let axApp = AXUIElementCreateApplication(app.processIdentifier)
+        guard let windows = copyAttribute(axApp, kAXWindowsAttribute as CFString) as? [AXUIElement] else {
+            return nil
+        }
+
+        let appName = app.localizedName ?? app.bundleIdentifier ?? "Unknown App"
+        var bestWindow: AXUIElement?
+        var bestPriority = Int.min
+        var bestArea: CGFloat = 0
+
+        for window in windows {
+            let role = axString(window, kAXRoleAttribute as CFString) ?? ""
+            guard role == kAXWindowRole as String || role == "AXWindow" else {
+                continue
+            }
+
+            let title = axString(window, kAXTitleAttribute as CFString) ?? ""
+            let subrole = axString(window, kAXSubroleAttribute as CFString) ?? ""
+            if WindowCompatibilityRules.shouldExcludeWindow(
+                appName: appName,
+                bundleIdentifier: app.bundleIdentifier,
+                title: title
+            ) {
+                continue
+            }
+
+            let priority = WindowFallbackPolicy.activationPriority(
+                title: title,
+                appName: appName,
+                subrole: subrole,
+                isMain: axBool(window, kAXMainAttribute as CFString) ?? false,
+                isFocused: axBool(window, kAXFocusedAttribute as CFString) ?? false
+            )
+
+            let area = axFrame(window).map { $0.width * $0.height } ?? 0
+            if priority > bestPriority || (priority == bestPriority && area > bestArea) {
+                bestWindow = window
+                bestPriority = priority
+                bestArea = area
+            }
+        }
+
+        return bestWindow
+    }
+
+    private func requestApplicationReopen(_ app: NSRunningApplication) {
+        guard let bundleURL = app.bundleURL else {
+            return
+        }
+
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.activates = true
+        configuration.createsNewApplicationInstance = false
+        NSWorkspace.shared.openApplication(
+            at: bundleURL,
+            configuration: configuration
+        ) { _, error in
+            if let error {
+                NSLog("Altp window reopen fallback failed: \(error.localizedDescription)")
+            }
+        }
     }
 }
 
+private struct WindowOrderingSnapshot {
+    let visibleOrder: [String: Int]
+    let fallbackCandidatesByPID: [pid_t: [WindowServerFallbackCandidate]]
+}
+
 private enum WindowOrdering {
-    static func snapshot() -> [String: Int] {
-        let options: CGWindowListOption = [.optionOnScreenOnly, .excludeDesktopElements]
-        guard let rawWindows = CGWindowListCopyWindowInfo(options, kCGNullWindowID) as? [[String: Any]] else {
-            return [:]
-        }
+    static func snapshot() -> WindowOrderingSnapshot {
+        let onScreenOptions: CGWindowListOption = [.optionOnScreenOnly, .excludeDesktopElements]
+        let onScreenWindows = CGWindowListCopyWindowInfo(onScreenOptions, kCGNullWindowID)
+            as? [[String: Any]] ?? []
 
         var order: [String: Int] = [:]
-        for (index, window) in rawWindows.enumerated() {
+        var onScreenWindowNumbers: Set<Int> = []
+        for (index, window) in onScreenWindows.enumerated() {
             guard intValue(window[kCGWindowLayer as String]) == 0,
                   let pid = intValue(window[kCGWindowOwnerPID as String]) else {
                 continue
+            }
+
+            if let windowNumber = intValue(window[kCGWindowNumber as String]) {
+                onScreenWindowNumbers.insert(windowNumber)
             }
 
             let title = window[kCGWindowName as String] as? String ?? ""
@@ -340,7 +531,34 @@ private enum WindowOrdering {
                 order[key] = index
             }
         }
-        return order
+
+        let allOptions: CGWindowListOption = [.optionAll, .excludeDesktopElements]
+        let allWindows = CGWindowListCopyWindowInfo(allOptions, kCGNullWindowID)
+            as? [[String: Any]] ?? []
+        var fallbackCandidatesByPID: [pid_t: [WindowServerFallbackCandidate]] = [:]
+        for (index, window) in allWindows.enumerated() {
+            guard let pid = intValue(window[kCGWindowOwnerPID as String]),
+                  let windowNumber = intValue(window[kCGWindowNumber as String]),
+                  let layer = intValue(window[kCGWindowLayer as String]),
+                  let frame = cgFrame(window[kCGWindowBounds as String]) else {
+                continue
+            }
+
+            fallbackCandidatesByPID[pid_t(pid), default: []].append(
+                WindowServerFallbackCandidate(
+                    frame: frame,
+                    layer: layer,
+                    alpha: doubleValue(window[kCGWindowAlpha as String]) ?? 1,
+                    order: index,
+                    isOnScreen: onScreenWindowNumbers.contains(windowNumber)
+                )
+            )
+        }
+
+        return WindowOrderingSnapshot(
+            visibleOrder: order,
+            fallbackCandidatesByPID: fallbackCandidatesByPID
+        )
     }
 
     static func key(pid: pid_t, title: String, frame: CGRect?) -> String {
@@ -365,6 +583,16 @@ private enum WindowOrdering {
         }
         if let number = value as? NSNumber {
             return number.intValue
+        }
+        return nil
+    }
+
+    private static func doubleValue(_ value: Any?) -> Double? {
+        if let double = value as? Double {
+            return double
+        }
+        if let number = value as? NSNumber {
+            return number.doubleValue
         }
         return nil
     }
@@ -454,86 +682,49 @@ private func isExcludedWindowTitle(
     }
 }
 
-func shouldExcludeUntitledAuxiliaryWindow(
-    appName: String,
-    bundleIdentifier: String?,
-    title: String
-) -> Bool {
-    guard title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-        return false
-    }
+private func deduplicateWindowsUsingCompatibilityRules(
+    _ items: [WindowItem]
+) -> [WindowItem] {
+    var primaryWindowByKey: [String: WindowItem] = [:]
 
-    if bundleIdentifier?.lowercased() == "com.electron.lark" ||
-        isFeishuMeetingApp(appName: appName, bundleIdentifier: bundleIdentifier) {
-        return true
-    }
-
-    let normalizedAppName = normalizedIdentityPart(appName)
-    return normalizedAppName == "飞书" ||
-        normalizedAppName == "飞书会议" ||
-        normalizedAppName == "feishu" ||
-        normalizedAppName == "feishu meeting" ||
-        normalizedAppName == "lark" ||
-        normalizedAppName == "lark meeting"
-}
-
-private func deduplicateFeishuMeetingWindows(_ items: [WindowItem]) -> [WindowItem] {
-    var primaryWindowByPID: [pid_t: WindowItem] = [:]
-
-    for item in items where isFeishuMeetingApp(
-        appName: item.appName,
-        bundleIdentifier: item.bundleIdentifier
-    ) {
-        let pid = item.app.processIdentifier
-        guard let current = primaryWindowByPID[pid] else {
-            primaryWindowByPID[pid] = item
+    for item in items {
+        guard let key = WindowCompatibilityRules.deduplicationKey(
+            appName: item.appName,
+            bundleIdentifier: item.bundleIdentifier,
+            processIdentifier: item.app.processIdentifier
+        ) else {
             continue
         }
 
-        if isPreferredFeishuMeetingWindow(item, over: current) {
-            primaryWindowByPID[pid] = item
+        guard let current = primaryWindowByKey[key] else {
+            primaryWindowByKey[key] = item
+            continue
+        }
+
+        if WindowCompatibilityRules.prefers(
+            compatibilityPreference(for: item),
+            over: compatibilityPreference(for: current)
+        ) {
+            primaryWindowByKey[key] = item
         }
     }
 
     return items.filter { item in
-        guard isFeishuMeetingApp(
+        guard let key = WindowCompatibilityRules.deduplicationKey(
             appName: item.appName,
-            bundleIdentifier: item.bundleIdentifier
+            bundleIdentifier: item.bundleIdentifier,
+            processIdentifier: item.app.processIdentifier
         ) else {
             return true
         }
-
-        return primaryWindowByPID[item.app.processIdentifier] === item
+        return primaryWindowByKey[key] === item
     }
 }
 
-private func isPreferredFeishuMeetingWindow(
-    _ candidate: WindowItem,
-    over current: WindowItem
-) -> Bool {
-    if candidate.hasMeaningfulTitle != current.hasMeaningfulTitle {
-        return candidate.hasMeaningfulTitle
-    }
-
-    let candidateArea = candidate.frame.map { $0.width * $0.height } ?? 0
-    let currentArea = current.frame.map { $0.width * $0.height } ?? 0
-    if candidateArea != currentArea {
-        return candidateArea > currentArea
-    }
-
-    return candidate.order < current.order
-}
-
-private func isFeishuMeetingApp(
-    appName: String,
-    bundleIdentifier: String?
-) -> Bool {
-    if bundleIdentifier?.lowercased() == "com.electron.lark.iron" {
-        return true
-    }
-
-    let normalizedAppName = normalizedIdentityPart(appName)
-    return normalizedAppName == "飞书会议" ||
-        normalizedAppName == "feishu meeting" ||
-        normalizedAppName == "lark meeting"
+private func compatibilityPreference(for item: WindowItem) -> WindowCompatibilityPreference {
+    WindowCompatibilityPreference(
+        hasMeaningfulTitle: item.hasMeaningfulTitle,
+        area: item.frame.map { Double($0.width * $0.height) } ?? 0,
+        order: item.order
+    )
 }
