@@ -4,7 +4,7 @@
 
 # Altp
 
-Altp is a macOS window switcher. Press `Option + Space` to open a Spotlight-style search panel, search by app name or window title, and press Return to focus the selected window. You can also press `Option + Tab` to open a horizontal quick switcher and choose a window directly.
+Altp is a macOS window switcher. Press `Option + Space` to open a Spotlight-style search panel, search by app name or window title, and press Return to focus the selected window. You can also press `Option + Tab` to open an adaptive quick-switch grid and choose a window directly.
 
 ## Features
 
@@ -13,7 +13,7 @@ Altp is a macOS window switcher. Press `Option + Space` to open a Spotlight-styl
 - Shares ranking memory between search and quick switching. If you repeatedly switch between two windows, `Option + Tab` prioritizes the other recent window.
 - Filters hidden apps and narrowly verified compatibility windows by default. Settings lets you edit excluded title rules and choose whether minimized windows are shown.
 - Supports arrow-key navigation, Return to switch, and Escape to close.
-- Opens a horizontal quick switcher with `Option + Tab`; press Tab repeatedly to move the selection, then release Option or press Return to switch.
+- Opens an adaptive multi-row quick-switch grid with `Option + Tab`, showing all windows at once whenever they fit on screen; press Tab repeatedly to move the selection, then release Option or press Return to switch.
 - Restores minimized windows before focusing them.
 - Runs in the menu bar without occupying the Dock by default.
 - Includes Settings for search and quick-switch shortcuts, launch at login, and Accessibility permission status.
@@ -106,7 +106,7 @@ build -> Developer ID signing with Hardened Runtime -> zip -> notarization -> st
 The final artifact is written to:
 
 ```text
-dist/release/Altp-0.1.11-macOS.zip
+dist/release/Altp-0.1.12-macOS.zip
 ```
 
 Verify Gatekeeper acceptance before publishing:

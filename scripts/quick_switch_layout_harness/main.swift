@@ -14,32 +14,35 @@ let externalFrame = CGRect(x: 0, y: 0, width: 2_560, height: 1_440)
 let compactMetrics = QuickSwitchLayoutPolicy.metrics(forVisibleWidth: compactFrame.width)
 let builtInMetrics = QuickSwitchLayoutPolicy.metrics(forVisibleWidth: builtInFrame.width)
 let externalMetrics = QuickSwitchLayoutPolicy.metrics(forVisibleWidth: externalFrame.width)
-let compactPanel = QuickSwitchLayoutPolicy.panelSize(
+let compactLayout = QuickSwitchLayoutPolicy.gridLayout(
     windowCount: 20,
     visibleFrame: compactFrame,
     metrics: compactMetrics
 )
-let builtInPanel = QuickSwitchLayoutPolicy.panelSize(
+let builtInLayout = QuickSwitchLayoutPolicy.gridLayout(
     windowCount: 20,
     visibleFrame: builtInFrame,
     metrics: builtInMetrics
 )
-let externalPanel = QuickSwitchLayoutPolicy.panelSize(
+let externalLayout = QuickSwitchLayoutPolicy.gridLayout(
     windowCount: 20,
     visibleFrame: externalFrame,
     metrics: externalMetrics
 )
-let builtInCapacity = QuickSwitchLayoutPolicy.visibleItemCapacity(
+let compactPanel = compactLayout.panelSize
+let builtInPanel = builtInLayout.panelSize
+let externalPanel = externalLayout.panelSize
+let builtInCapacity = QuickSwitchLayoutPolicy.columnCapacity(
     windowCount: 20,
     visibleFrame: builtInFrame,
     metrics: builtInMetrics
 )
-let externalCapacity = QuickSwitchLayoutPolicy.visibleItemCapacity(
+let externalCapacity = QuickSwitchLayoutPolicy.columnCapacity(
     windowCount: 20,
     visibleFrame: externalFrame,
     metrics: externalMetrics
 )
-let compactCapacity = QuickSwitchLayoutPolicy.visibleItemCapacity(
+let compactCapacity = QuickSwitchLayoutPolicy.columnCapacity(
     windowCount: 20,
     visibleFrame: compactFrame,
     metrics: compactMetrics
@@ -55,7 +58,7 @@ expect(
 )
 expect(
     compactCapacity == 8 && builtInCapacity == 9 && externalCapacity == 10,
-    "the layout must show more windows as display width increases"
+    "the layout must use more columns as display width increases"
 )
 expect(
     QuickSwitchLayoutPolicy.contentWidth(itemCount: compactCapacity, metrics: compactMetrics)
@@ -67,22 +70,49 @@ expect(
     "all advertised visible cards must fit without clipping"
 )
 expect(
-    QuickSwitchLayoutPolicy.panelSize(
+    QuickSwitchLayoutPolicy.gridLayout(
         windowCount: compactCapacity + 1,
         visibleFrame: compactFrame,
         metrics: compactMetrics
-    ).width == compactPanel.width &&
-        QuickSwitchLayoutPolicy.panelSize(
+    ).panelSize.width == compactPanel.width &&
+        QuickSwitchLayoutPolicy.gridLayout(
             windowCount: builtInCapacity + 1,
             visibleFrame: builtInFrame,
             metrics: builtInMetrics
-        ).width == builtInPanel.width &&
-        QuickSwitchLayoutPolicy.panelSize(
+        ).panelSize.width == builtInPanel.width &&
+        QuickSwitchLayoutPolicy.gridLayout(
             windowCount: externalCapacity + 1,
             visibleFrame: externalFrame,
             metrics: externalMetrics
-        ).width == externalPanel.width,
-    "the next window must scroll instead of expanding the compact panel"
+        ).panelSize.width == externalPanel.width,
+    "the next window must wrap instead of expanding the compact panel"
+)
+expect(
+    compactLayout.rowCount == 3 &&
+        builtInLayout.rowCount == 3 &&
+        externalLayout.rowCount == 2,
+    "twenty windows must wrap into the expected number of rows"
+)
+expect(
+    compactLayout.showsAllWindows &&
+        builtInLayout.showsAllWindows &&
+        externalLayout.showsAllWindows,
+    "normal window counts must be fully visible without scrolling"
+)
+expect(
+    QuickSwitchLayoutPolicy.contentHeight(
+        rowCount: compactLayout.rowCount,
+        metrics: compactMetrics
+    ) <= compactPanel.height &&
+        QuickSwitchLayoutPolicy.contentHeight(
+            rowCount: builtInLayout.rowCount,
+            metrics: builtInMetrics
+        ) <= builtInPanel.height &&
+        QuickSwitchLayoutPolicy.contentHeight(
+            rowCount: externalLayout.rowCount,
+            metrics: externalMetrics
+        ) <= externalPanel.height,
+    "every normal grid row must fit inside the panel"
 )
 
 let builtInWidthRatio = builtInPanel.width / builtInFrame.width
@@ -104,6 +134,104 @@ expect(
 expect(
     builtInMetrics.itemWidth < 140 && builtInMetrics.itemHeight < 124,
     "the built-in display must use compact cards"
+)
+
+let compactFortyWindowLayout = QuickSwitchLayoutPolicy.gridLayout(
+    windowCount: 40,
+    visibleFrame: compactFrame,
+    metrics: compactMetrics
+)
+expect(
+    compactFortyWindowLayout.showsAllWindows,
+    "a compact display must show forty windows at once"
+)
+
+let compactOverflowLayout = QuickSwitchLayoutPolicy.gridLayout(
+    windowCount: 41,
+    visibleFrame: compactFrame,
+    metrics: compactMetrics
+)
+let builtInMaximumLayout = QuickSwitchLayoutPolicy.gridLayout(
+    windowCount: 54,
+    visibleFrame: builtInFrame,
+    metrics: builtInMetrics
+)
+let builtInOverflowLayout = QuickSwitchLayoutPolicy.gridLayout(
+    windowCount: 55,
+    visibleFrame: builtInFrame,
+    metrics: builtInMetrics
+)
+let externalMaximumLayout = QuickSwitchLayoutPolicy.gridLayout(
+    windowCount: 90,
+    visibleFrame: externalFrame,
+    metrics: externalMetrics
+)
+let externalOverflowLayout = QuickSwitchLayoutPolicy.gridLayout(
+    windowCount: 91,
+    visibleFrame: externalFrame,
+    metrics: externalMetrics
+)
+expect(
+    compactOverflowLayout.requiresVerticalScrolling &&
+        builtInMaximumLayout.showsAllWindows &&
+        builtInOverflowLayout.requiresVerticalScrolling &&
+        externalMaximumLayout.showsAllWindows &&
+        externalOverflowLayout.requiresVerticalScrolling,
+    "each display class must scroll only after its full-grid capacity is exceeded"
+)
+expect(
+    QuickSwitchLayoutPolicy.contentHeight(
+        rowCount: builtInOverflowLayout.visibleRowCount,
+        metrics: builtInMetrics
+    ) <= builtInFrame.height - 96 &&
+        QuickSwitchLayoutPolicy.contentHeight(
+            rowCount: builtInOverflowLayout.visibleRowCount + 1,
+            metrics: builtInMetrics
+        ) > builtInFrame.height - 96,
+    "overflow must use every complete row that fits without clipping another row"
+)
+
+let extremeLayout = QuickSwitchLayoutPolicy.gridLayout(
+    windowCount: 200,
+    visibleFrame: builtInFrame,
+    metrics: builtInMetrics
+)
+expect(
+    extremeLayout.requiresVerticalScrolling &&
+        extremeLayout.visibleRowCount < extremeLayout.rowCount,
+    "only extreme window counts may fall back to vertical scrolling"
+)
+expect(
+    extremeLayout.panelSize.height <= builtInFrame.height - 96,
+    "a scrolling grid must preserve vertical screen margins"
+)
+
+expect(
+    QuickSwitchGridNavigation.verticalDestination(
+        from: 17,
+        direction: 1,
+        itemCount: 20,
+        columnCount: 9
+    ) == 19,
+    "moving down into a short final row must stay as close as possible to the same column"
+)
+expect(
+    QuickSwitchGridNavigation.verticalDestination(
+        from: 19,
+        direction: 1,
+        itemCount: 20,
+        columnCount: 9
+    ) == 1,
+    "moving down from the final row must wrap to the first row in the same column"
+)
+expect(
+    QuickSwitchGridNavigation.verticalDestination(
+        from: 8,
+        direction: -1,
+        itemCount: 20,
+        columnCount: 9
+    ) == 19,
+    "moving up into a short final row must choose its nearest available item"
 )
 expect(
     compactMetrics.iconTopTwoLines

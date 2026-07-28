@@ -15,6 +15,7 @@ final class QuickSwitchPanelController: NSObject {
     private var sourceWindow: WindowItem?
     private var shouldActivateOnModifierRelease = false
     private var isActivatingSelection = false
+    private var layoutColumnCount = 1
     private var layoutMetrics = QuickSwitchLayoutPolicy.metrics(
         forVisibleWidth: QuickSwitchLayoutPolicy.referenceScreenWidth
     )
@@ -128,7 +129,7 @@ final class QuickSwitchPanelController: NSObject {
         effectView.layer?.masksToBounds = true
         panel.contentView = effectView
 
-        flowLayout.scrollDirection = .horizontal
+        flowLayout.scrollDirection = .vertical
         collectionView.collectionViewLayout = flowLayout
         applyLayoutMetrics()
         collectionView.backgroundColors = [.clear]
@@ -145,8 +146,8 @@ final class QuickSwitchPanelController: NSObject {
         scrollView.hasHorizontalScroller = false
         scrollView.hasVerticalScroller = false
         scrollView.autohidesScrollers = true
-        scrollView.horizontalScrollElasticity = .automatic
-        scrollView.verticalScrollElasticity = .none
+        scrollView.horizontalScrollElasticity = .none
+        scrollView.verticalScrollElasticity = .automatic
         scrollView.documentView = collectionView
         scrollView.hasHorizontalScroller = false
         scrollView.horizontalScroller = nil
@@ -202,10 +203,10 @@ final class QuickSwitchPanelController: NSObject {
                 self.hide()
                 return nil
             case 125:
-                self.moveSelection(delta: 1)
+                self.moveSelectionVertically(direction: 1)
                 return nil
             case 126:
-                self.moveSelection(delta: -1)
+                self.moveSelectionVertically(direction: -1)
                 return nil
             case 123:
                 self.moveSelection(delta: -1)
@@ -227,14 +228,25 @@ final class QuickSwitchPanelController: NSObject {
 
     private func positionPanel(on screen: NSScreen) {
         let visibleFrame = screen.visibleFrame
-        let panelSize = QuickSwitchLayoutPolicy.panelSize(
+        let gridLayout = QuickSwitchLayoutPolicy.gridLayout(
             windowCount: windows.count,
             visibleFrame: visibleFrame,
             metrics: layoutMetrics
         )
+        layoutColumnCount = gridLayout.columnCount
+        scrollView.verticalScrollElasticity = gridLayout.requiresVerticalScrolling
+            ? .automatic
+            : .none
+
+        let panelSize = gridLayout.panelSize
+        let edgeMargin: CGFloat = 24
+        let preferredY = visibleFrame.midY
+            - panelSize.height / 2
+            + visibleFrame.height * 0.08
+        let maximumY = visibleFrame.maxY - panelSize.height - edgeMargin
         let origin = NSPoint(
             x: visibleFrame.midX - panelSize.width / 2,
-            y: visibleFrame.midY - panelSize.height / 2 + visibleFrame.height * 0.08
+            y: min(max(preferredY, visibleFrame.minY + edgeMargin), maximumY)
         )
 
         panel.setFrame(
@@ -302,6 +314,21 @@ final class QuickSwitchPanelController: NSObject {
         selectRow(next)
     }
 
+    private func moveSelectionVertically(direction: Int) {
+        guard !windows.isEmpty else {
+            return
+        }
+
+        let current = collectionView.selectionIndexPaths.first?.item ?? 0
+        let next = QuickSwitchGridNavigation.verticalDestination(
+            from: current,
+            direction: direction,
+            itemCount: windows.count,
+            columnCount: layoutColumnCount
+        )
+        selectRow(next)
+    }
+
     private func selectRow(_ row: Int) {
         guard row >= 0, row < windows.count else {
             return
@@ -315,34 +342,10 @@ final class QuickSwitchPanelController: NSObject {
     private func scrollItemToVisible(at indexPath: IndexPath) {
         panel.contentView?.layoutSubtreeIfNeeded()
         collectionView.layoutSubtreeIfNeeded()
-
-        guard let layout = collectionView.collectionViewLayout,
-              let attributes = collectionView.layoutAttributesForItem(at: indexPath) else {
-            collectionView.scrollToItems(at: [indexPath], scrollPosition: .nearestHorizontalEdge)
-            return
-        }
-
-        let clipView = scrollView.contentView
-        let visibleRect = clipView.documentVisibleRect
-        let itemFrame = attributes.frame
-        let horizontalPadding: CGFloat = 6
-        var targetX = visibleRect.origin.x
-
-        if itemFrame.minX < visibleRect.minX + horizontalPadding {
-            targetX = itemFrame.minX - horizontalPadding
-        } else if itemFrame.maxX > visibleRect.maxX - horizontalPadding {
-            targetX = itemFrame.maxX - visibleRect.width + horizontalPadding
-        }
-
-        let maximumX = max(0, layout.collectionViewContentSize.width - visibleRect.width)
-        targetX = min(max(0, targetX), maximumX)
-
-        guard abs(targetX - visibleRect.origin.x) > 0.5 else {
-            return
-        }
-
-        clipView.scroll(to: NSPoint(x: targetX, y: visibleRect.origin.y))
-        scrollView.reflectScrolledClipView(clipView)
+        collectionView.scrollToItems(
+            at: [indexPath],
+            scrollPosition: .nearestVerticalEdge
+        )
     }
 
     private func activateIfModifierWasReleased(_ modifierFlags: NSEvent.ModifierFlags) {

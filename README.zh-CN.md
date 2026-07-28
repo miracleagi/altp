@@ -4,7 +4,7 @@
 
 # Altp
 
-Altp 是一个 macOS 窗口切换器：用 `Option + Space` 唤起类似 Spotlight 的搜索框，输入 App 名称或窗口标题后按回车切换到对应窗口；也可以用 `Option + Tab` 打开横向快速切换器并选择窗口。
+Altp 是一个 macOS 窗口切换器：用 `Option + Space` 唤起类似 Spotlight 的搜索框，输入 App 名称或窗口标题后按回车切换到对应窗口；也可以用 `Option + Tab` 打开自适应快速切换网格并选择窗口。
 
 ## 功能
 
@@ -13,7 +13,7 @@ Altp 是一个 macOS 窗口切换器：用 `Option + Space` 唤起类似 Spotlig
 - 搜索和快速切换共享排序记忆；如果最近一直在两个窗口之间切换，`Option + Tab` 会优先默认切回另一个窗口。
 - 默认过滤隐藏 App 的窗口和内部窗口标题（例如 WatermarkWidget），Settings 里可以编辑排除标题规则并选择是否显示最小化窗口。
 - 方向键选择，回车切换，Esc 关闭。
-- `Option + Tab` 打开横向快速切换器，连续按会移动选择，松开 Option 或按回车切换。
+- `Option + Tab` 打开自适应多行快速切换网格；只要屏幕容纳得下，就会一次显示全部窗口。连续按 Tab 会移动选择，松开 Option 或按回车切换。
 - 支持最小化窗口恢复后切换。
 - 菜单栏常驻，默认不占用 Dock。
 - Settings 窗口支持配置搜索快捷键、快速切换快捷键、开机启动和查看辅助权限状态。
@@ -106,7 +106,7 @@ build -> Developer ID signing with Hardened Runtime -> zip -> notarization -> st
 最终产物：
 
 ```text
-dist/release/Altp-0.1.6-macOS.zip
+dist/release/Altp-0.1.12-macOS.zip
 ```
 
 发布前可以验证 Gatekeeper 是否接受：

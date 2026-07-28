@@ -17,12 +17,58 @@ struct QuickSwitchLayoutMetrics: Equatable {
     let contentSideInset: CGFloat
 }
 
+struct QuickSwitchGridLayout: Equatable {
+    let columnCount: Int
+    let rowCount: Int
+    let visibleRowCount: Int
+    let panelSize: CGSize
+
+    var showsAllWindows: Bool {
+        visibleRowCount == rowCount
+    }
+
+    var requiresVerticalScrolling: Bool {
+        !showsAllWindows
+    }
+}
+
+enum QuickSwitchGridNavigation {
+    static func verticalDestination(
+        from currentIndex: Int,
+        direction: Int,
+        itemCount: Int,
+        columnCount: Int
+    ) -> Int {
+        guard itemCount > 0, columnCount > 0 else {
+            return 0
+        }
+
+        let clampedIndex = min(max(currentIndex, 0), itemCount - 1)
+        guard direction != 0 else {
+            return clampedIndex
+        }
+
+        let rowCount = Int(
+            ceil(Double(itemCount) / Double(columnCount))
+        )
+        let currentRow = clampedIndex / columnCount
+        let currentColumn = clampedIndex % columnCount
+        let rowDelta = direction > 0 ? 1 : -1
+        let targetRow = (currentRow + rowDelta + rowCount) % rowCount
+        let targetRowStart = targetRow * columnCount
+        let targetRowEnd = min(targetRowStart + columnCount, itemCount) - 1
+
+        return min(targetRowStart + currentColumn, targetRowEnd)
+    }
+}
+
 enum QuickSwitchLayoutPolicy {
     static let referenceScreenWidth: CGFloat = 1_728
     static let maximumVisibleItems = 10
     private static let baseItemHeight: CGFloat = 124
     private static let compactPanelWidthRatio: CGFloat = 0.76
     private static let minimumItemWidth: CGFloat = 88
+    private static let panelVerticalMargin: CGFloat = 96
 
     static func metrics(forVisibleWidth visibleWidth: CGFloat) -> QuickSwitchLayoutMetrics {
         let widthRatio = max(visibleWidth, 1) / referenceScreenWidth
@@ -66,7 +112,7 @@ enum QuickSwitchLayoutPolicy {
         )
     }
 
-    static func visibleItemCapacity(
+    static func columnCapacity(
         windowCount: Int,
         visibleFrame: CGRect,
         metrics: QuickSwitchLayoutMetrics
@@ -98,24 +144,66 @@ enum QuickSwitchLayoutPolicy {
             + metrics.horizontalInset * 2
     }
 
-    static func panelSize(
+    static func contentHeight(
+        rowCount: Int,
+        metrics: QuickSwitchLayoutMetrics
+    ) -> CGFloat {
+        let clampedCount = max(rowCount, 1)
+        return CGFloat(clampedCount) * metrics.itemHeight
+            + CGFloat(max(clampedCount - 1, 0)) * metrics.itemSpacing
+            + metrics.verticalInset * 2
+    }
+
+    static func gridLayout(
         windowCount: Int,
         visibleFrame: CGRect,
         metrics: QuickSwitchLayoutMetrics
-    ) -> CGSize {
-        let visibleItems = visibleItemCapacity(
+    ) -> QuickSwitchGridLayout {
+        let columnCount = columnCapacity(
             windowCount: windowCount,
             visibleFrame: visibleFrame,
             metrics: metrics
         )
-        let requiredContentWidth = contentWidth(itemCount: visibleItems, metrics: metrics)
+        let clampedWindowCount = max(windowCount, 1)
+        let rowCount = max(
+            1,
+            Int(ceil(Double(clampedWindowCount) / Double(columnCount)))
+        )
+
+        let maximumHeight = max(
+            contentHeight(rowCount: 1, metrics: metrics),
+            visibleFrame.height - panelVerticalMargin
+        )
+        let rowStride = metrics.itemHeight + metrics.itemSpacing
+        let fittingRows = Int(
+            (
+                (
+                    maximumHeight
+                        - metrics.verticalInset * 2
+                        + metrics.itemSpacing
+                ) / rowStride
+            ).rounded(.down)
+        )
+        let visibleRowCount = min(rowCount, max(fittingRows, 1))
+
+        let requiredContentWidth = contentWidth(
+            itemCount: columnCount,
+            metrics: metrics
+        )
         let maximumWidth = maximumPanelWidth(for: visibleFrame)
         let minimumWidth = min(maximumWidth, 220 * visualScale(for: metrics))
         let width = min(max(requiredContentWidth, minimumWidth), maximumWidth)
+        let height = contentHeight(
+            rowCount: visibleRowCount,
+            metrics: metrics
+        )
 
-        let contentHeight = metrics.itemHeight + metrics.verticalInset * 2
-        let height = min(contentHeight, visibleFrame.height - 96)
-        return CGSize(width: width, height: height)
+        return QuickSwitchGridLayout(
+            columnCount: columnCount,
+            rowCount: rowCount,
+            visibleRowCount: visibleRowCount,
+            panelSize: CGSize(width: width, height: height)
+        )
     }
 
     private static func visualScale(for metrics: QuickSwitchLayoutMetrics) -> CGFloat {
