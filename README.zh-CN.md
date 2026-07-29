@@ -12,6 +12,8 @@
 <p align="center">
   <a href="https://github.com/miracleagi/altp/releases/latest"><strong>下载最新版本</strong></a>
   ·
+  <a href="./release.md">更新记录</a>
+  ·
   <a href="./README.md">English</a>
   ·
   <strong>简体中文</strong>
@@ -76,7 +78,7 @@ Altp 切换的是具体窗口，而不只是 App。它常驻菜单栏，提供�
 | 切换到所选窗口 | 松开 `Option` 或按 `Return` |
 | 取消 | `Esc` |
 
-两个全局快捷键都可以在 **Settings → General** 中修改。快速切换目前要求快捷键包含 `Option`，才能正常使用“松开即切换”。
+两个全局快捷键都可以在 **Settings → General** 中修改。快速切换会根据已配置的修饰键执行“松开即切换”；无修饰键快捷键会保持面板打开，直到按下 `Return` 或 `Esc`。
 
 ## 设置
 

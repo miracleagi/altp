@@ -12,6 +12,8 @@
 <p align="center">
   <a href="https://github.com/miracleagi/altp/releases/latest"><strong>Download latest release</strong></a>
   ·
+  <a href="./release.md">Release notes</a>
+  ·
   <strong>English</strong>
   ·
   <a href="./README.zh-CN.md">简体中文</a>
@@ -76,7 +78,7 @@ Quick Switch displays all available windows at once whenever they fit on the cur
 | Switch to selected window | Release `Option` or press `Return` |
 | Cancel | `Esc` |
 
-Both global shortcuts can be changed under **Settings → General**. Quick Switch currently expects its shortcut to include `Option` so release-to-switch works correctly.
+Both global shortcuts can be changed under **Settings → General**. Quick Switch follows the configured modifier keys for release-to-switch; a modifierless shortcut stays open until you press `Return` or `Esc`.
 
 ## Settings
 
