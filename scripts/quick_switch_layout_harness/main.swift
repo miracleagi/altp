@@ -103,16 +103,67 @@ expect(
     QuickSwitchLayoutPolicy.contentHeight(
         rowCount: compactLayout.rowCount,
         metrics: compactMetrics
-    ) <= compactPanel.height &&
+    ) + QuickSwitchLayoutPolicy.viewportSafetyHeight <= compactPanel.height &&
         QuickSwitchLayoutPolicy.contentHeight(
             rowCount: builtInLayout.rowCount,
             metrics: builtInMetrics
-        ) <= builtInPanel.height &&
+        ) + QuickSwitchLayoutPolicy.viewportSafetyHeight <= builtInPanel.height &&
         QuickSwitchLayoutPolicy.contentHeight(
             rowCount: externalLayout.rowCount,
             metrics: externalMetrics
-        ) <= externalPanel.height,
-    "every normal grid row must fit inside the panel"
+        ) + QuickSwitchLayoutPolicy.viewportSafetyHeight <= externalPanel.height,
+    "every normal grid row must fit with viewport safety space"
+)
+
+let compactTwentyTwoWindowLayout = QuickSwitchLayoutPolicy.gridLayout(
+    windowCount: 22,
+    visibleFrame: compactFrame,
+    metrics: compactMetrics
+)
+let builtInTwentyTwoWindowLayout = QuickSwitchLayoutPolicy.gridLayout(
+    windowCount: 22,
+    visibleFrame: builtInFrame,
+    metrics: builtInMetrics
+)
+let externalTwentyTwoWindowLayout = QuickSwitchLayoutPolicy.gridLayout(
+    windowCount: 22,
+    visibleFrame: externalFrame,
+    metrics: externalMetrics
+)
+expect(
+    compactTwentyTwoWindowLayout.rowCount == 3 &&
+        builtInTwentyTwoWindowLayout.rowCount == 3 &&
+        externalTwentyTwoWindowLayout.rowCount == 3,
+    "twenty-two windows must form three complete rows on common displays"
+)
+expect(
+    compactTwentyTwoWindowLayout.showsAllWindows &&
+        builtInTwentyTwoWindowLayout.showsAllWindows &&
+        externalTwentyTwoWindowLayout.showsAllWindows,
+    "twenty-two windows must remain on one page"
+)
+expect(
+    QuickSwitchLayoutPolicy.contentHeight(
+        rowCount: builtInTwentyTwoWindowLayout.rowCount,
+        metrics: builtInMetrics
+    ) + QuickSwitchLayoutPolicy.viewportSafetyHeight
+        <= builtInTwentyTwoWindowLayout.panelSize.height,
+    "the twenty-two-window grid must not rely on exact-height viewport equality"
+)
+let correctedTwentyTwoWindowHeight =
+    QuickSwitchLayoutPolicy.panelHeightResolvingOverflow(
+        plannedHeight: builtInTwentyTwoWindowLayout.panelSize.height,
+        viewportHeight: builtInTwentyTwoWindowLayout.panelSize.height - 1,
+        contentHeight: builtInTwentyTwoWindowLayout.panelSize.height,
+        maximumHeight: builtInFrame.height
+            - QuickSwitchLayoutPolicy.panelVerticalMargin
+    )
+expect(
+    correctedTwentyTwoWindowHeight
+        == builtInTwentyTwoWindowLayout.panelSize.height
+            + QuickSwitchLayoutPolicy.viewportSafetyHeight
+            + 1,
+    "a one-point runtime overflow must expand the panel with fresh safety space"
 )
 
 let builtInWidthRatio = builtInPanel.width / builtInFrame.width
@@ -183,11 +234,13 @@ expect(
     QuickSwitchLayoutPolicy.contentHeight(
         rowCount: builtInOverflowLayout.visibleRowCount,
         metrics: builtInMetrics
-    ) <= builtInFrame.height - 96 &&
+    ) + QuickSwitchLayoutPolicy.viewportSafetyHeight
+        <= builtInFrame.height - QuickSwitchLayoutPolicy.panelVerticalMargin &&
         QuickSwitchLayoutPolicy.contentHeight(
             rowCount: builtInOverflowLayout.visibleRowCount + 1,
             metrics: builtInMetrics
-        ) > builtInFrame.height - 96,
+        ) + QuickSwitchLayoutPolicy.viewportSafetyHeight
+            > builtInFrame.height - QuickSwitchLayoutPolicy.panelVerticalMargin,
     "overflow must use every complete row that fits without clipping another row"
 )
 
@@ -202,7 +255,8 @@ expect(
     "only extreme window counts may fall back to vertical scrolling"
 )
 expect(
-    extremeLayout.panelSize.height <= builtInFrame.height - 96,
+    extremeLayout.panelSize.height
+        <= builtInFrame.height - QuickSwitchLayoutPolicy.panelVerticalMargin,
     "a scrolling grid must preserve vertical screen margins"
 )
 
@@ -233,6 +287,166 @@ expect(
     ) == 19,
     "moving up into a short final row must choose its nearest available item"
 )
+
+let firstSelection = QuickSwitchGridNavigation.destination(
+    from: nil,
+    preferredColumn: nil,
+    direction: .next,
+    itemCount: 22,
+    columnCount: 9
+)
+let lastSelection = QuickSwitchGridNavigation.destination(
+    from: nil,
+    preferredColumn: nil,
+    direction: .previous,
+    itemCount: 22,
+    columnCount: 9
+)
+expect(
+    firstSelection?.index == 0 && lastSelection?.index == 21,
+    "an empty selection must recover without skipping the first or last item"
+)
+expect(
+    QuickSwitchGridNavigation.destination(
+        from: nil,
+        preferredColumn: nil,
+        direction: .next,
+        itemCount: 0,
+        columnCount: 9
+    ) == nil,
+    "an empty grid must not manufacture a selection"
+)
+expect(
+    QuickSwitchGridNavigation.destination(
+        from: 0,
+        preferredColumn: nil,
+        direction: .next,
+        itemCount: 5,
+        columnCount: 0
+    ) == nil,
+    "an invalid column count must not manufacture a selection"
+)
+
+let shortRowDown = QuickSwitchGridNavigation.destination(
+    from: 17,
+    preferredColumn: nil,
+    direction: .down,
+    itemCount: 22,
+    columnCount: 9
+)
+let shortRowWrapped = QuickSwitchGridNavigation.destination(
+    from: shortRowDown?.index,
+    preferredColumn: shortRowDown?.preferredColumn,
+    direction: .down,
+    itemCount: 22,
+    columnCount: 9
+)
+let shortRowCompleted = QuickSwitchGridNavigation.destination(
+    from: shortRowWrapped?.index,
+    preferredColumn: shortRowWrapped?.preferredColumn,
+    direction: .down,
+    itemCount: 22,
+    columnCount: 9
+)
+expect(
+    shortRowDown == QuickSwitchNavigationResult(index: 21, preferredColumn: 8)
+        && shortRowWrapped == QuickSwitchNavigationResult(index: 8, preferredColumn: 8)
+        && shortRowCompleted == QuickSwitchNavigationResult(index: 17, preferredColumn: 8),
+    "vertical navigation must preserve its intended column across a short final row"
+)
+let shortRowUp = QuickSwitchGridNavigation.destination(
+    from: 8,
+    preferredColumn: nil,
+    direction: .up,
+    itemCount: 22,
+    columnCount: 9
+)
+let shortRowUpAgain = QuickSwitchGridNavigation.destination(
+    from: shortRowUp?.index,
+    preferredColumn: shortRowUp?.preferredColumn,
+    direction: .up,
+    itemCount: 22,
+    columnCount: 9
+)
+expect(
+    shortRowUp == QuickSwitchNavigationResult(index: 21, preferredColumn: 8)
+        && shortRowUpAgain == QuickSwitchNavigationResult(index: 17, preferredColumn: 8),
+    "upward navigation must restore its intended column after crossing a short row"
+)
+expect(
+    QuickSwitchGridNavigation.destination(
+        from: 21,
+        preferredColumn: 8,
+        direction: .previous,
+        itemCount: 22,
+        columnCount: 9
+    ) == QuickSwitchNavigationResult(index: 20, preferredColumn: 2),
+    "horizontal navigation must reset the preferred column to the visible item"
+)
+expect(
+    QuickSwitchGridNavigation.destination(
+        from: 99,
+        preferredColumn: 8,
+        direction: .next,
+        itemCount: 22,
+        columnCount: 9
+    ) == QuickSwitchNavigationResult(index: 0, preferredColumn: 0),
+    "an invalid stale selection must recover to a valid boundary item"
+)
+
+for itemCount in 1...64 {
+    for columnCount in 1...12 {
+        let rowCount = Int(
+            ceil(Double(itemCount) / Double(columnCount))
+        )
+        for index in 0..<itemCount {
+            guard let next = QuickSwitchGridNavigation.destination(
+                from: index,
+                preferredColumn: nil,
+                direction: .next,
+                itemCount: itemCount,
+                columnCount: columnCount
+            ),
+            let previous = QuickSwitchGridNavigation.destination(
+                from: next.index,
+                preferredColumn: next.preferredColumn,
+                direction: .previous,
+                itemCount: itemCount,
+                columnCount: columnCount
+            ) else {
+                expect(false, "valid horizontal navigation must return a destination")
+                continue
+            }
+            expect(
+                previous.index == index,
+                "horizontal navigation must be reversible"
+            )
+
+            var vertical = QuickSwitchNavigationResult(
+                index: index,
+                preferredColumn: index % columnCount
+            )
+            for _ in 0..<rowCount {
+                guard let nextRow = QuickSwitchGridNavigation.destination(
+                    from: vertical.index,
+                    preferredColumn: vertical.preferredColumn,
+                    direction: .down,
+                    itemCount: itemCount,
+                    columnCount: columnCount
+                ) else {
+                    expect(false, "valid vertical navigation must return a destination")
+                    break
+                }
+                vertical = nextRow
+            }
+            expect(
+                vertical.index == index,
+                "a full vertical cycle must return to its starting item"
+            )
+        }
+    }
+}
+
 expect(
     compactMetrics.iconTopTwoLines
         + compactMetrics.iconSize

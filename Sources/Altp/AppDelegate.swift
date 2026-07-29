@@ -161,8 +161,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 keyCode: shortcut.keyCode,
                 modifiers: shortcut.modifiers,
                 action: { [weak self] in
-                    DispatchQueue.main.async {
-                        self?.performQuickSwitch(activateOnModifierRelease: true)
+                    if Thread.isMainThread {
+                        self?.performQuickSwitch(
+                            activateOnModifierRelease: shortcut.activatesOnModifierRelease
+                        )
+                    } else {
+                        DispatchQueue.main.async { [weak self] in
+                            self?.performQuickSwitch(
+                                activateOnModifierRelease: shortcut.activatesOnModifierRelease
+                            )
+                        }
                     }
                 }
             )

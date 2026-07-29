@@ -19,6 +19,29 @@ struct KeyboardShortcut: Equatable {
         ShortcutFormatter.displayString(keyCode: keyCode, modifiers: modifiers)
     }
 
+    var eventModifierFlags: NSEvent.ModifierFlags {
+        var flags: NSEvent.ModifierFlags = []
+
+        if modifiers & UInt32(controlKey) != 0 {
+            flags.insert(.control)
+        }
+        if modifiers & UInt32(optionKey) != 0 {
+            flags.insert(.option)
+        }
+        if modifiers & UInt32(shiftKey) != 0 {
+            flags.insert(.shift)
+        }
+        if modifiers & UInt32(cmdKey) != 0 {
+            flags.insert(.command)
+        }
+
+        return flags
+    }
+
+    var activatesOnModifierRelease: Bool {
+        !eventModifierFlags.isEmpty
+    }
+
     static func carbonModifiers(from flags: NSEvent.ModifierFlags) -> UInt32 {
         let relevantFlags = flags.intersection(.deviceIndependentFlagsMask)
         var carbonModifiers: UInt32 = 0

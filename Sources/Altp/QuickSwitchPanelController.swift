@@ -1,4 +1,5 @@
 import AppKit
+import Carbon
 import CoreGraphics
 
 final class QuickSwitchPanelController: NSObject {
@@ -14,8 +15,11 @@ final class QuickSwitchPanelController: NSObject {
     private var windows: [WindowItem] = []
     private var sourceWindow: WindowItem?
     private var shouldActivateOnModifierRelease = false
+    private var activationModifierFlags: NSEvent.ModifierFlags = []
     private var isActivatingSelection = false
     private var layoutColumnCount = 1
+    private var preferredNavigationColumn: Int?
+    private var requiresVerticalScrolling = false
     private var layoutMetrics = QuickSwitchLayoutPolicy.metrics(
         forVisibleWidth: QuickSwitchLayoutPolicy.referenceScreenWidth
     )
@@ -48,6 +52,9 @@ final class QuickSwitchPanelController: NSObject {
     func showOrAdvance(activateOnModifierRelease: Bool = false) {
         if panel.isVisible {
             shouldActivateOnModifierRelease = shouldActivateOnModifierRelease || activateOnModifierRelease
+            if activateOnModifierRelease {
+                activationModifierFlags = AppSettings.quickSwitchShortcut.eventModifierFlags
+            }
             startModifierReleasePollingIfNeeded()
             if let screen = targetScreen() {
                 if updateLayout(for: screen) {
@@ -55,7 +62,7 @@ final class QuickSwitchPanelController: NSObject {
                 }
                 positionPanel(on: screen)
             }
-            moveSelection(delta: 1)
+            navigate(.next)
             return
         }
 
@@ -66,7 +73,9 @@ final class QuickSwitchPanelController: NSObject {
         panel.orderOut(nil)
         sourceWindow = nil
         shouldActivateOnModifierRelease = false
+        activationModifierFlags = []
         isActivatingSelection = false
+        preferredNavigationColumn = nil
         stopModifierReleasePolling()
     }
 
@@ -76,22 +85,37 @@ final class QuickSwitchPanelController: NSObject {
             return
         }
 
+        let sourceFocusSnapshot = WindowRanking.captureCurrentFocus()
+        shouldActivateOnModifierRelease = activateOnModifierRelease
+        activationModifierFlags = activateOnModifierRelease
+            ? AppSettings.quickSwitchShortcut.eventModifierFlags
+            : []
+        panel.alphaValue = 0
+        NSApp.activate(ignoringOtherApps: true)
+        panel.makeKeyAndOrderFront(nil)
+        panel.makeFirstResponder(collectionView)
+
         let allWindows = catalog.allWindows()
-        sourceWindow = WindowRanking.currentWindow(in: allWindows)
+        sourceWindow = WindowRanking.currentWindow(
+            in: allWindows,
+            focusSnapshot: sourceFocusSnapshot
+        )
         if let sourceWindow {
             WindowSelectionMemory.shared.recordObservation(sourceWindow)
         }
-        shouldActivateOnModifierRelease = activateOnModifierRelease
         windows = WindowRanking.sortedForEmptyQuery(allWindows, sourceWindow: sourceWindow)
         collectionView.selectionIndexPaths = []
+        preferredNavigationColumn = nil
         emptyLabel.isHidden = !windows.isEmpty
 
         guard !windows.isEmpty else {
+            hide()
             NSSound.beep()
             return
         }
 
         guard let screen = targetScreen() else {
+            hide()
             NSSound.beep()
             return
         }
@@ -101,7 +125,6 @@ final class QuickSwitchPanelController: NSObject {
         selectRow(defaultSelectionRow())
 
         panel.alphaValue = 1
-        NSApp.activate(ignoringOtherApps: true)
         panel.makeKeyAndOrderFront(nil)
         panel.makeFirstResponder(collectionView)
         startModifierReleasePollingIfNeeded()
@@ -133,6 +156,7 @@ final class QuickSwitchPanelController: NSObject {
         collectionView.collectionViewLayout = flowLayout
         applyLayoutMetrics()
         collectionView.backgroundColors = [.clear]
+        collectionView.autoresizingMask = [.width]
         collectionView.isSelectable = true
         collectionView.allowsMultipleSelection = false
         collectionView.delegate = self
@@ -148,6 +172,9 @@ final class QuickSwitchPanelController: NSObject {
         scrollView.autohidesScrollers = true
         scrollView.horizontalScrollElasticity = .none
         scrollView.verticalScrollElasticity = .automatic
+        scrollView.automaticallyAdjustsContentInsets = false
+        scrollView.contentInsets = NSEdgeInsets()
+        scrollView.scrollerInsets = NSEdgeInsets()
         scrollView.documentView = collectionView
         scrollView.hasHorizontalScroller = false
         scrollView.horizontalScroller = nil
@@ -185,6 +212,10 @@ final class QuickSwitchPanelController: NSObject {
             }
 
             if event.type == .leftMouseDown {
+                guard event.window === self.panel else {
+                    return event
+                }
+                self.updatePreferredNavigationColumn(at: event.locationInWindow)
                 if event.clickCount == 2 {
                     self.activateItem(at: event.locationInWindow)
                     return nil
@@ -192,38 +223,45 @@ final class QuickSwitchPanelController: NSObject {
                 return event
             }
 
-            switch event.keyCode {
-            case 36, 76:
-                self.activateSelectedWindow()
-                return nil
-            case 48:
-                self.moveSelection(delta: event.modifierFlags.contains(.shift) ? -1 : 1)
-                return nil
-            case 53:
-                self.hide()
-                return nil
-            case 125:
-                self.moveSelectionVertically(direction: 1)
-                return nil
-            case 126:
-                self.moveSelectionVertically(direction: -1)
-                return nil
-            case 123:
-                self.moveSelection(delta: -1)
-                return nil
-            case 124:
-                self.moveSelection(delta: 1)
-                return nil
-            default:
+            guard self.panel.isKeyWindow || event.window === self.panel else {
                 return event
             }
+            return self.handleKeyDown(event) ? nil : event
         }
 
-        globalEventMonitor = NSEvent.addGlobalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
+        globalEventMonitor = NSEvent.addGlobalMonitorForEvents(
+            matching: .flagsChanged
+        ) { [weak self] event in
             DispatchQueue.main.async {
                 self?.activateIfModifierWasReleased(event.modifierFlags)
             }
         }
+    }
+
+    private func handleKeyDown(_ event: NSEvent) -> Bool {
+        guard panel.isVisible else {
+            return false
+        }
+
+        switch event.keyCode {
+        case UInt16(kVK_Return), UInt16(kVK_ANSI_KeypadEnter):
+            activateSelectedWindow()
+        case UInt16(kVK_Tab):
+            navigate(event.modifierFlags.contains(.shift) ? .previous : .next)
+        case UInt16(kVK_Escape):
+            hide()
+        case UInt16(kVK_DownArrow):
+            navigate(.down)
+        case UInt16(kVK_UpArrow):
+            navigate(.up)
+        case UInt16(kVK_LeftArrow):
+            navigate(.previous)
+        case UInt16(kVK_RightArrow):
+            navigate(.next)
+        default:
+            return false
+        }
+        return true
     }
 
     private func positionPanel(on screen: NSScreen) {
@@ -233,12 +271,58 @@ final class QuickSwitchPanelController: NSObject {
             visibleFrame: visibleFrame,
             metrics: layoutMetrics
         )
-        layoutColumnCount = gridLayout.columnCount
-        scrollView.verticalScrollElasticity = gridLayout.requiresVerticalScrolling
+        if layoutColumnCount != gridLayout.columnCount {
+            layoutColumnCount = gridLayout.columnCount
+            preferredNavigationColumn = selectedWindowIndex.map {
+                $0 % layoutColumnCount
+            }
+        }
+
+        var panelSize = gridLayout.panelSize
+        setPanelFrame(size: panelSize, on: visibleFrame, display: false)
+        panel.contentView?.layoutSubtreeIfNeeded()
+
+        var viewportState = QuickSwitchCollectionViewport.synchronize(
+            collectionView: collectionView,
+            scrollView: scrollView,
+            flowLayout: flowLayout,
+            allowsVerticalScrolling: gridLayout.requiresVerticalScrolling
+        )
+
+        if gridLayout.showsAllWindows, viewportState.hasVerticalOverflow {
+            let maximumHeight = max(
+                panelSize.height,
+                visibleFrame.height - QuickSwitchLayoutPolicy.panelVerticalMargin
+            )
+            panelSize.height = QuickSwitchLayoutPolicy.panelHeightResolvingOverflow(
+                plannedHeight: panelSize.height,
+                viewportHeight: viewportState.viewportSize.height,
+                contentHeight: viewportState.contentSize.height,
+                maximumHeight: maximumHeight
+            )
+            setPanelFrame(size: panelSize, on: visibleFrame, display: false)
+            panel.contentView?.layoutSubtreeIfNeeded()
+            viewportState = QuickSwitchCollectionViewport.synchronize(
+                collectionView: collectionView,
+                scrollView: scrollView,
+                flowLayout: flowLayout,
+                allowsVerticalScrolling: false
+            )
+        }
+
+        requiresVerticalScrolling = gridLayout.requiresVerticalScrolling
+            || viewportState.hasVerticalOverflow
+        scrollView.verticalScrollElasticity = requiresVerticalScrolling
             ? .automatic
             : .none
+        setPanelFrame(size: panelSize, on: visibleFrame, display: true)
+    }
 
-        let panelSize = gridLayout.panelSize
+    private func setPanelFrame(
+        size panelSize: NSSize,
+        on visibleFrame: NSRect,
+        display: Bool
+    ) {
         let edgeMargin: CGFloat = 24
         let preferredY = visibleFrame.midY
             - panelSize.height / 2
@@ -251,7 +335,7 @@ final class QuickSwitchPanelController: NSObject {
 
         panel.setFrame(
             NSRect(origin: origin, size: panelSize),
-            display: true
+            display: display
         )
     }
 
@@ -304,54 +388,67 @@ final class QuickSwitchPanelController: NSObject {
         return windows.firstIndex { !$0.representsSameWindow(as: sourceWindow) } ?? 0
     }
 
-    private func moveSelection(delta: Int) {
-        guard !windows.isEmpty else {
-            return
+    private var selectedWindowIndex: Int? {
+        guard let index = collectionView.selectionIndexPaths.first?.item,
+              windows.indices.contains(index) else {
+            return nil
         }
-
-        let current = collectionView.selectionIndexPaths.first?.item ?? 0
-        let next = (current + delta + windows.count) % windows.count
-        selectRow(next)
+        return index
     }
 
-    private func moveSelectionVertically(direction: Int) {
-        guard !windows.isEmpty else {
-            return
-        }
-
-        let current = collectionView.selectionIndexPaths.first?.item ?? 0
-        let next = QuickSwitchGridNavigation.verticalDestination(
-            from: current,
+    private func navigate(_ direction: QuickSwitchNavigationDirection) {
+        guard let result = QuickSwitchGridNavigation.destination(
+            from: selectedWindowIndex,
+            preferredColumn: preferredNavigationColumn,
             direction: direction,
             itemCount: windows.count,
             columnCount: layoutColumnCount
-        )
-        selectRow(next)
+        ) else {
+            return
+        }
+
+        preferredNavigationColumn = result.preferredColumn
+        selectRow(result.index, updatesPreferredColumn: false)
     }
 
-    private func selectRow(_ row: Int) {
+    private func selectRow(
+        _ row: Int,
+        updatesPreferredColumn: Bool = true
+    ) {
         guard row >= 0, row < windows.count else {
             return
         }
 
+        if updatesPreferredColumn {
+            preferredNavigationColumn = row % max(layoutColumnCount, 1)
+        }
         let indexPath = IndexPath(item: row, section: 0)
         collectionView.selectionIndexPaths = [indexPath]
         scrollItemToVisible(at: indexPath)
     }
 
     private func scrollItemToVisible(at indexPath: IndexPath) {
-        panel.contentView?.layoutSubtreeIfNeeded()
+        guard requiresVerticalScrolling else {
+            return
+        }
+
         collectionView.layoutSubtreeIfNeeded()
-        collectionView.scrollToItems(
-            at: [indexPath],
-            scrollPosition: .nearestVerticalEdge
+        if let attributes = flowLayout.layoutAttributesForItem(at: indexPath),
+           scrollView.contentView.documentVisibleRect.contains(attributes.frame) {
+            return
+        }
+        QuickSwitchCollectionViewport.reveal(
+            indexPath,
+            collectionView: collectionView,
+            scrollView: scrollView,
+            allowsVerticalScrolling: requiresVerticalScrolling
         )
     }
 
     private func activateIfModifierWasReleased(_ modifierFlags: NSEvent.ModifierFlags) {
         guard shouldActivateOnModifierRelease,
               panel.isVisible,
-              !isOptionPressed(in: modifierFlags) else {
+              !activationModifiersArePressed(in: modifierFlags) else {
             return
         }
 
@@ -359,7 +456,9 @@ final class QuickSwitchPanelController: NSObject {
     }
 
     private func startModifierReleasePollingIfNeeded() {
-        guard shouldActivateOnModifierRelease, modifierReleaseTimer == nil else {
+        guard shouldActivateOnModifierRelease,
+              !activationModifierFlags.isEmpty,
+              modifierReleaseTimer == nil else {
             return
         }
 
@@ -378,19 +477,32 @@ final class QuickSwitchPanelController: NSObject {
     private func activateIfModifierIsNoLongerPressed() {
         guard shouldActivateOnModifierRelease,
               panel.isVisible,
-              !isOptionPressedInSession() else {
+              !activationModifiersArePressedInSession() else {
             return
         }
 
         activateSelectedWindow()
     }
 
-    private func isOptionPressed(in flags: NSEvent.ModifierFlags) -> Bool {
-        flags.intersection(.deviceIndependentFlagsMask).contains(.option)
+    private func activationModifiersArePressed(
+        in flags: NSEvent.ModifierFlags
+    ) -> Bool {
+        !flags
+            .intersection(.deviceIndependentFlagsMask)
+            .intersection(activationModifierFlags)
+            .isEmpty
     }
 
-    private func isOptionPressedInSession() -> Bool {
-        CGEventSource.flagsState(.combinedSessionState).contains(.maskAlternate)
+    private func activationModifiersArePressedInSession() -> Bool {
+        let sessionFlags = CGEventSource.flagsState(.combinedSessionState)
+        return (activationModifierFlags.contains(.control)
+                    && sessionFlags.contains(.maskControl))
+            || (activationModifierFlags.contains(.option)
+                    && sessionFlags.contains(.maskAlternate))
+            || (activationModifierFlags.contains(.shift)
+                    && sessionFlags.contains(.maskShift))
+            || (activationModifierFlags.contains(.command)
+                    && sessionFlags.contains(.maskCommand))
     }
 
     @objc private func activateSelectedWindow() {
@@ -420,13 +532,24 @@ final class QuickSwitchPanelController: NSObject {
     }
 
     private func activateItem(at windowLocation: NSPoint) {
-        let collectionLocation = collectionView.convert(windowLocation, from: nil)
-        guard let indexPath = collectionView.indexPathForItem(at: collectionLocation) else {
+        guard let indexPath = indexPath(at: windowLocation) else {
             return
         }
 
         selectRow(indexPath.item)
         activateSelectedWindow()
+    }
+
+    private func updatePreferredNavigationColumn(at windowLocation: NSPoint) {
+        guard let indexPath = indexPath(at: windowLocation) else {
+            return
+        }
+        preferredNavigationColumn = indexPath.item % max(layoutColumnCount, 1)
+    }
+
+    private func indexPath(at windowLocation: NSPoint) -> IndexPath? {
+        let collectionLocation = collectionView.convert(windowLocation, from: nil)
+        return collectionView.indexPathForItem(at: collectionLocation)
     }
 }
 
@@ -458,7 +581,14 @@ extension QuickSwitchPanelController: NSCollectionViewDataSource, NSCollectionVi
 
 extension QuickSwitchPanelController: NSWindowDelegate {
     func windowDidResignKey(_ notification: Notification) {
-        hide()
+        DispatchQueue.main.async { [weak self] in
+            guard let self,
+                  self.panel.isVisible,
+                  !self.panel.isKeyWindow else {
+                return
+            }
+            self.hide()
+        }
     }
 }
 

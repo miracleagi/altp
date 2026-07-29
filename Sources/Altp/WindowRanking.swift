@@ -2,6 +2,11 @@ import AppKit
 import ApplicationServices
 
 enum WindowRanking {
+    struct FocusSnapshot {
+        fileprivate let application: NSRunningApplication
+        fileprivate let focusedWindow: AXUIElement?
+    }
+
     private struct EvaluatedWindow {
         let item: WindowItem
         let baseScore: Int
@@ -15,27 +20,52 @@ enum WindowRanking {
         let sortKey: WindowSortKey
     }
 
-    static func currentWindow(in items: [WindowItem]) -> WindowItem? {
-        guard let frontmostApp = NSWorkspace.shared.frontmostApplication else {
+    static func captureCurrentFocus() -> FocusSnapshot? {
+        guard let application = NSWorkspace.shared.frontmostApplication else {
             return nil
         }
 
-        let frontmostItems = items.filter { item in
-            item.app.processIdentifier == frontmostApp.processIdentifier && !item.isMinimized
-        }
-        guard !frontmostItems.isEmpty else {
-            return nil
-        }
-
-        let axApp = AXUIElementCreateApplication(frontmostApp.processIdentifier)
+        let axApp = AXUIElementCreateApplication(application.processIdentifier)
         var focusedValue: CFTypeRef?
+        let focusedWindow: AXUIElement?
         if AXUIElementCopyAttributeValue(
             axApp,
             kAXFocusedWindowAttribute as CFString,
             &focusedValue
         ) == .success,
-           let focusedWindow = focusedValue {
-            let focusedAXWindow = unsafeBitCast(focusedWindow, to: AXUIElement.self)
+           let focusedValue {
+            focusedWindow = unsafeBitCast(focusedValue, to: AXUIElement.self)
+        } else {
+            focusedWindow = nil
+        }
+
+        return FocusSnapshot(
+            application: application,
+            focusedWindow: focusedWindow
+        )
+    }
+
+    static func currentWindow(in items: [WindowItem]) -> WindowItem? {
+        currentWindow(in: items, focusSnapshot: captureCurrentFocus())
+    }
+
+    static func currentWindow(
+        in items: [WindowItem],
+        focusSnapshot: FocusSnapshot?
+    ) -> WindowItem? {
+        guard let focusSnapshot else {
+            return nil
+        }
+
+        let frontmostItems = items.filter { item in
+            item.app.processIdentifier == focusSnapshot.application.processIdentifier
+                && !item.isMinimized
+        }
+        guard !frontmostItems.isEmpty else {
+            return nil
+        }
+
+        if let focusedAXWindow = focusSnapshot.focusedWindow {
             if let exactMatch = frontmostItems.first(where: { item in
                 CFEqual(item.axWindow, focusedAXWindow)
             }) {

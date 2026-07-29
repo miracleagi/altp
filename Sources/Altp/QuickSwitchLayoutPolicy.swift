@@ -32,12 +32,79 @@ struct QuickSwitchGridLayout: Equatable {
     }
 }
 
+enum QuickSwitchNavigationDirection {
+    case previous
+    case next
+    case up
+    case down
+}
+
+struct QuickSwitchNavigationResult: Equatable {
+    let index: Int
+    let preferredColumn: Int
+}
+
 enum QuickSwitchGridNavigation {
+    static func destination(
+        from currentIndex: Int?,
+        preferredColumn: Int?,
+        direction: QuickSwitchNavigationDirection,
+        itemCount: Int,
+        columnCount: Int
+    ) -> QuickSwitchNavigationResult? {
+        guard itemCount > 0, columnCount > 0 else {
+            return nil
+        }
+
+        let safeColumnCount = columnCount
+        guard let currentIndex,
+              currentIndex >= 0,
+              currentIndex < itemCount else {
+            let initialIndex: Int
+            switch direction {
+            case .previous, .up:
+                initialIndex = itemCount - 1
+            case .next, .down:
+                initialIndex = 0
+            }
+            return QuickSwitchNavigationResult(
+                index: initialIndex,
+                preferredColumn: initialIndex % safeColumnCount
+            )
+        }
+
+        switch direction {
+        case .previous, .next:
+            let delta = direction == .next ? 1 : -1
+            let index = (currentIndex + delta + itemCount) % itemCount
+            return QuickSwitchNavigationResult(
+                index: index,
+                preferredColumn: index % safeColumnCount
+            )
+        case .up, .down:
+            let column = min(
+                max(preferredColumn ?? currentIndex % safeColumnCount, 0),
+                safeColumnCount - 1
+            )
+            return QuickSwitchNavigationResult(
+                index: verticalDestination(
+                    from: currentIndex,
+                    direction: direction == .down ? 1 : -1,
+                    itemCount: itemCount,
+                    columnCount: safeColumnCount,
+                    preferredColumn: column
+                ),
+                preferredColumn: column
+            )
+        }
+    }
+
     static func verticalDestination(
         from currentIndex: Int,
         direction: Int,
         itemCount: Int,
-        columnCount: Int
+        columnCount: Int,
+        preferredColumn: Int? = nil
     ) -> Int {
         guard itemCount > 0, columnCount > 0 else {
             return 0
@@ -53,22 +120,27 @@ enum QuickSwitchGridNavigation {
         )
         let currentRow = clampedIndex / columnCount
         let currentColumn = clampedIndex % columnCount
+        let targetColumn = min(
+            max(preferredColumn ?? currentColumn, 0),
+            columnCount - 1
+        )
         let rowDelta = direction > 0 ? 1 : -1
         let targetRow = (currentRow + rowDelta + rowCount) % rowCount
         let targetRowStart = targetRow * columnCount
         let targetRowEnd = min(targetRowStart + columnCount, itemCount) - 1
 
-        return min(targetRowStart + currentColumn, targetRowEnd)
+        return min(targetRowStart + targetColumn, targetRowEnd)
     }
 }
 
 enum QuickSwitchLayoutPolicy {
     static let referenceScreenWidth: CGFloat = 1_728
     static let maximumVisibleItems = 10
+    static let viewportSafetyHeight: CGFloat = 8
     private static let baseItemHeight: CGFloat = 124
     private static let compactPanelWidthRatio: CGFloat = 0.76
     private static let minimumItemWidth: CGFloat = 88
-    private static let panelVerticalMargin: CGFloat = 96
+    static let panelVerticalMargin: CGFloat = 96
 
     static func metrics(forVisibleWidth visibleWidth: CGFloat) -> QuickSwitchLayoutMetrics {
         let widthRatio = max(visibleWidth, 1) / referenceScreenWidth
@@ -154,6 +226,23 @@ enum QuickSwitchLayoutPolicy {
             + metrics.verticalInset * 2
     }
 
+    static func panelHeightResolvingOverflow(
+        plannedHeight: CGFloat,
+        viewportHeight: CGFloat,
+        contentHeight: CGFloat,
+        maximumHeight: CGFloat
+    ) -> CGFloat {
+        let overflowHeight = contentHeight - viewportHeight
+        guard overflowHeight > 0.5 else {
+            return plannedHeight
+        }
+
+        return min(
+            max(plannedHeight, maximumHeight),
+            plannedHeight + ceil(overflowHeight) + viewportSafetyHeight
+        )
+    }
+
     static func gridLayout(
         windowCount: Int,
         visibleFrame: CGRect,
@@ -171,7 +260,7 @@ enum QuickSwitchLayoutPolicy {
         )
 
         let maximumHeight = max(
-            contentHeight(rowCount: 1, metrics: metrics),
+            contentHeight(rowCount: 1, metrics: metrics) + viewportSafetyHeight,
             visibleFrame.height - panelVerticalMargin
         )
         let rowStride = metrics.itemHeight + metrics.itemSpacing
@@ -179,6 +268,7 @@ enum QuickSwitchLayoutPolicy {
             (
                 (
                     maximumHeight
+                        - viewportSafetyHeight
                         - metrics.verticalInset * 2
                         + metrics.itemSpacing
                 ) / rowStride
@@ -196,7 +286,7 @@ enum QuickSwitchLayoutPolicy {
         let height = contentHeight(
             rowCount: visibleRowCount,
             metrics: metrics
-        )
+        ) + viewportSafetyHeight
 
         return QuickSwitchGridLayout(
             columnCount: columnCount,
