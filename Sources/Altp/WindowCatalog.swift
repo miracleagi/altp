@@ -1,5 +1,6 @@
 import AppKit
 import ApplicationServices
+import Darwin
 
 final class WindowItem: NSObject {
     let app: NSRunningApplication
@@ -18,6 +19,8 @@ final class WindowItem: NSObject {
     let catalogIndex: Int
     let sessionSortKey: CFHashCode
     let fallbackKind: WindowFallbackKind?
+    private(set) var persistentMemoryKey: String?
+    private let applicationLaunchTime: TimeInterval?
 
     init(
         app: NSRunningApplication,
@@ -52,6 +55,21 @@ final class WindowItem: NSObject {
         self.catalogIndex = catalogIndex
         self.sessionSortKey = CFHash(axWindow)
         self.fallbackKind = fallbackKind
+        self.applicationLaunchTime = app.launchDate?.timeIntervalSince1970
+            ?? processStartTime(for: app.processIdentifier)
+        let applicationKey = WindowIdentityPolicy.applicationKey(
+            bundleIdentifier: bundleIdentifier,
+            appName: appName
+        )
+        self.persistentMemoryKey = WindowIdentityPolicy.persistentWindowKey(
+            applicationKey: applicationKey,
+            appName: appName,
+            bundleIdentifier: bundleIdentifier,
+            title: title,
+            subrole: subrole,
+            document: document,
+            identifier: identifier
+        )
     }
 
     var displayTitle: String {
@@ -93,35 +111,19 @@ final class WindowItem: NSObject {
         ])
     }
 
-    var persistentMemoryKey: String? {
-        if isCursorWindow {
-            return [
-                normalizedIdentityPart(bundleIdentifier ?? appName),
-                normalizedIdentityPart(subrole),
-                cursorWorkspaceIdentity
-            ]
-            .joined(separator: "|")
-        }
-
-        if isChromeWindow {
-            return nil
-        }
-
-        return [
-            normalizedIdentityPart(bundleIdentifier ?? appName),
-            normalizedIdentityPart(title),
-            normalizedIdentityPart(subrole),
-            persistentIdentityHint
-        ]
-        .joined(separator: "|")
-    }
-
     var appMemoryKey: String {
-        normalizedIdentityPart(bundleIdentifier ?? appName)
+        WindowIdentityPolicy.applicationKey(
+            bundleIdentifier: bundleIdentifier,
+            appName: appName
+        )
     }
 
     var appSessionKey: String {
-        "\(appMemoryKey)|pid:\(app.processIdentifier)"
+        return WindowIdentityPolicy.applicationSessionKey(
+            applicationKey: appMemoryKey,
+            processIdentifier: app.processIdentifier,
+            launchTime: applicationLaunchTime
+        )
     }
 
     var sessionMemoryKey: String {
@@ -137,57 +139,83 @@ final class WindowItem: NSObject {
         CFEqual(axWindow, other.axWindow)
     }
 
-    private var isCursorWindow: Bool {
-        bundleIdentifier?.lowercased() == "com.todesktop.230313mzl4w4u92" ||
-            normalizedIdentityPart(appName) == "cursor"
-    }
-
-    private var isChromeWindow: Bool {
-        bundleIdentifier?.lowercased().hasPrefix("com.google.chrome") == true ||
-            normalizedIdentityPart(appName) == "google chrome"
-    }
-
-    private var cursorWorkspaceIdentity: String {
-        if let separatorRange = title.range(of: " — ", options: .backwards) {
-            let workspace = normalizedIdentityPart(String(title[separatorRange.upperBound...]))
-            if !workspace.isEmpty {
-                return "workspace:\(workspace)"
-            }
-        }
-
-        let normalizedIdentifier = normalizedIdentityPart(identifier)
-        if !normalizedIdentifier.isEmpty {
-            return "identifier:\(normalizedIdentifier)"
-        }
-
-        guard let frame else {
-            return "window:default"
-        }
-
-        return "frame:\(Int(frame.origin.x.rounded())),\(Int(frame.origin.y.rounded())),\(Int(frame.width.rounded())),\(Int(frame.height.rounded()))"
-    }
-
-    private var persistentIdentityHint: String {
-        let normalizedDocument = normalizedIdentityPart(document)
-        if !normalizedDocument.isEmpty {
-            return "document:\(normalizedDocument)"
-        }
-
-        let normalizedIdentifier = normalizedIdentityPart(identifier)
-        if !normalizedIdentifier.isEmpty {
-            return "identifier:\(normalizedIdentifier)"
-        }
-
-        guard let frame else {
-            return "frame:unknown"
-        }
-
-        return "frame:\(Int(frame.origin.x.rounded())),\(Int(frame.origin.y.rounded())),\(Int(frame.width.rounded())),\(Int(frame.height.rounded()))"
+    fileprivate func disablePersistentMemory() {
+        persistentMemoryKey = nil
     }
 
 }
 
+struct VerifiedWindowFocusSnapshot {
+    let processIdentifier: pid_t
+    let focusedWindow: AXUIElement
+    let capturedAt: TimeInterval
+}
+
+enum WindowActivationResult {
+    case focused(WindowItem)
+    case failed(AXError)
+    case superseded
+}
+
 final class WindowCatalog {
+    private var activationSequence = WindowActivationSequence()
+
+    func captureStrictFocusSnapshot(
+        expectedPID: pid_t? = nil,
+        capturedAt: TimeInterval = Date().timeIntervalSince1970
+    ) -> VerifiedWindowFocusSnapshot? {
+        guard let frontmostApplication = NSWorkspace.shared.frontmostApplication else {
+            return nil
+        }
+
+        let processIdentifier = frontmostApplication.processIdentifier
+        if let expectedPID, processIdentifier != expectedPID {
+            return nil
+        }
+
+        let axApplication = AXUIElementCreateApplication(processIdentifier)
+        guard let focusedWindow = copyAttribute(
+            axApplication,
+            kAXFocusedWindowAttribute as CFString
+        ), CFGetTypeID(focusedWindow) == AXUIElementGetTypeID() else {
+            return nil
+        }
+
+        return VerifiedWindowFocusSnapshot(
+            processIdentifier: processIdentifier,
+            focusedWindow: unsafeBitCast(focusedWindow, to: AXUIElement.self),
+            capturedAt: capturedAt
+        )
+    }
+
+    func strictlyFocusedWindow(
+        in items: [WindowItem],
+        snapshot: VerifiedWindowFocusSnapshot
+    ) -> WindowItem? {
+        items.first { item in
+            WindowFocusLearningPolicy.allowsRecording(
+                belongsToExpectedProcess:
+                    item.app.processIdentifier == snapshot.processIdentifier,
+                isMinimized: item.isMinimized,
+                isSyntheticFallback: item.fallbackKind != nil,
+                matchesFocusedAXWindow: CFEqual(
+                    item.axWindow,
+                    snapshot.focusedWindow
+                )
+            )
+        }
+    }
+
+    func strictlyFocusedWindow(
+        in items: [WindowItem],
+        expectedPID: pid_t
+    ) -> WindowItem? {
+        guard let snapshot = captureStrictFocusSnapshot(expectedPID: expectedPID) else {
+            return nil
+        }
+        return strictlyFocusedWindow(in: items, snapshot: snapshot)
+    }
+
     func allWindows() -> [WindowItem] {
         guard AccessibilityPermission.isTrusted else {
             return []
@@ -320,7 +348,10 @@ final class WindowCatalog {
             }
         }
 
-        return deduplicateWindowsUsingCompatibilityRules(results).sorted { lhs, rhs in
+        let deduplicatedItems = deduplicateWindowsUsingCompatibilityRules(results)
+        disableAmbiguousPersistentMemory(in: deduplicatedItems)
+
+        return deduplicatedItems.sorted { lhs, rhs in
             if lhs.order != rhs.order {
                 return lhs.order < rhs.order
             }
@@ -339,8 +370,11 @@ final class WindowCatalog {
 
     func activate(
         _ item: WindowItem,
-        completion: @escaping (AXError) -> Void
+        initiatedAt: TimeInterval = Date().timeIntervalSince1970,
+        completion: @escaping (WindowActivationResult) -> Void
     ) {
+        let request = activationSequence.begin(initiatedAt: initiatedAt)
+
         if item.isMinimized {
             AXUIElementSetAttributeValue(
                 item.axWindow,
@@ -350,77 +384,141 @@ final class WindowCatalog {
         }
 
         item.app.unhide()
-        if let fallbackKind = item.fallbackKind {
-            item.app.activate(options: activationOptions(for: fallbackKind))
-            retryFallbackActivation(
-                item,
-                attemptIndex: 0,
-                completion: completion
-            )
-            return
-        }
-
-        item.app.activate(options: [.activateIgnoringOtherApps])
-
-        AXUIElementSetAttributeValue(
-            item.axWindow,
-            kAXMainAttribute as CFString,
-            kCFBooleanTrue
+        performActivationActions(for: item)
+        verifyActivation(
+            item,
+            request: request,
+            attemptIndex: 0,
+            completion: completion
         )
-        AXUIElementSetAttributeValue(
-            item.axWindow,
-            kAXFocusedAttribute as CFString,
-            kCFBooleanTrue
-        )
-
-        completion(AXUIElementPerformAction(item.axWindow, kAXRaiseAction as CFString))
     }
 
-    private func retryFallbackActivation(
+    private func verifyActivation(
         _ item: WindowItem,
+        request: WindowActivationRequest,
         attemptIndex: Int,
-        completion: @escaping (AXError) -> Void
+        completion: @escaping (WindowActivationResult) -> Void
     ) {
-        let retryDelays: [TimeInterval] = [0.08, 0.16, 0.28, 0.48]
+        let retryDelays: [TimeInterval] = [0.04, 0.08, 0.16, 0.28, 0.48]
         guard attemptIndex < retryDelays.count else {
-            completion(.cannotComplete)
+            guard activationSequence.finishIfCurrent(request) else {
+                completion(.superseded)
+                return
+            }
+            completion(.failed(.cannotComplete))
             return
         }
 
         DispatchQueue.main.asyncAfter(deadline: .now() + retryDelays[attemptIndex]) { [weak self] in
-            guard let self, !item.app.isTerminated else {
-                completion(.cannotComplete)
+            guard let self else {
+                completion(.failed(.cannotComplete))
                 return
             }
 
-            if let window = self.preferredAXWindow(for: item.app) {
-                if let fallbackKind = item.fallbackKind {
-                    item.app.activate(options: self.activationOptions(for: fallbackKind))
-                }
-                let mainResult = AXUIElementSetAttributeValue(
-                    window,
-                    kAXMainAttribute as CFString,
-                    kCFBooleanTrue
-                )
-                let focusResult = AXUIElementSetAttributeValue(
-                    window,
-                    kAXFocusedAttribute as CFString,
-                    kCFBooleanTrue
-                )
-                let raiseResult = AXUIElementPerformAction(window, kAXRaiseAction as CFString)
-                if raiseResult == .success || mainResult == .success || focusResult == .success {
-                    completion(.success)
-                    return
-                }
+            guard self.activationSequence.isCurrent(request) else {
+                completion(.superseded)
+                return
             }
 
-            if attemptIndex == 0 {
+            guard !item.app.isTerminated else {
+                guard self.activationSequence.finishIfCurrent(request) else {
+                    completion(.superseded)
+                    return
+                }
+                completion(.failed(.cannotComplete))
+                return
+            }
+
+            if let focusedWindow = self.verifiedFocusedWindow(for: item) {
+                guard self.activationSequence.finishIfCurrent(request) else {
+                    completion(.superseded)
+                    return
+                }
+                completion(.focused(focusedWindow))
+                return
+            }
+
+            if item.fallbackKind != nil, attemptIndex == 0 {
                 self.requestApplicationReopen(item.app)
             }
-            self.retryFallbackActivation(
+
+            guard WindowActivationRetryPolicy.shouldRetry(
+                after: attemptIndex,
+                verificationCount: retryDelays.count
+            ) else {
+                guard self.activationSequence.finishIfCurrent(request) else {
+                    completion(.superseded)
+                    return
+                }
+                completion(.failed(.cannotComplete))
+                return
+            }
+
+            self.performActivationActions(for: item)
+            self.verifyActivation(
                 item,
+                request: request,
                 attemptIndex: attemptIndex + 1,
                 completion: completion
+            )
+        }
+    }
+
+    private func performActivationActions(for item: WindowItem) {
+        if let fallbackKind = item.fallbackKind {
+            item.app.activate(options: activationOptions(for: fallbackKind))
+            guard let window = preferredAXWindow(for: item.app) else {
+                return
+            }
+            focusAndRaise(window)
+            return
+        }
+
+        item.app.activate(options: [.activateIgnoringOtherApps])
+        focusAndRaise(item.axWindow)
+    }
+
+    private func focusAndRaise(_ window: AXUIElement) {
+        AXUIElementSetAttributeValue(
+            window,
+            kAXMainAttribute as CFString,
+            kCFBooleanTrue
+        )
+        AXUIElementSetAttributeValue(
+            window,
+            kAXFocusedAttribute as CFString,
+            kCFBooleanTrue
+        )
+        AXUIElementPerformAction(window, kAXRaiseAction as CFString)
+    }
+
+    private func verifiedFocusedWindow(for requestedItem: WindowItem) -> WindowItem? {
+        let processIdentifier = requestedItem.app.processIdentifier
+        guard NSWorkspace.shared.frontmostApplication?.processIdentifier == processIdentifier else {
+            return nil
+        }
+
+        switch WindowActivationVerificationPolicy.verificationSource(
+            requestedItemIsFallback: requestedItem.fallbackKind != nil
+        ) {
+        case .requestedAXWindow:
+            guard let snapshot = captureStrictFocusSnapshot(
+                expectedPID: processIdentifier
+            ), WindowActivationVerificationPolicy.acceptsDirectFocusedWindow(
+                matchesRequestedWindow: CFEqual(
+                    snapshot.focusedWindow,
+                    requestedItem.axWindow
+                )
+            ) else {
+                return nil
+            }
+            return requestedItem
+
+        case .freshCatalogFallback:
+            let windows = allWindows()
+            return strictlyFocusedWindow(
+                in: windows,
+                expectedPID: processIdentifier
             )
         }
     }
@@ -598,6 +696,24 @@ private enum WindowOrdering {
     }
 }
 
+private func processStartTime(for processIdentifier: pid_t) -> TimeInterval? {
+    var processInfo = proc_bsdinfo()
+    let expectedSize = MemoryLayout<proc_bsdinfo>.stride
+    let result = proc_pidinfo(
+        processIdentifier,
+        PROC_PIDTBSDINFO,
+        0,
+        &processInfo,
+        Int32(expectedSize)
+    )
+    guard result == expectedSize else {
+        return nil
+    }
+
+    return TimeInterval(processInfo.pbi_start_tvsec)
+        + TimeInterval(processInfo.pbi_start_tvusec) / 1_000_000
+}
+
 private func copyAttribute(_ element: AXUIElement, _ attribute: CFString) -> CFTypeRef? {
     var value: CFTypeRef?
     let error = AXUIElementCopyAttributeValue(element, attribute, &value)
@@ -718,6 +834,22 @@ private func deduplicateWindowsUsingCompatibilityRules(
             return true
         }
         return primaryWindowByKey[key] === item
+    }
+}
+
+private func disableAmbiguousPersistentMemory(in items: [WindowItem]) {
+    let ambiguousKeys = WindowIdentityPolicy.ambiguousPersistentKeys(
+        in: items.map(\.persistentMemoryKey)
+    )
+    guard !ambiguousKeys.isEmpty else {
+        return
+    }
+
+    for item in items {
+        if let key = item.persistentMemoryKey,
+           ambiguousKeys.contains(key) {
+            item.disablePersistentMemory()
+        }
     }
 }
 

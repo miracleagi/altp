@@ -13,6 +13,7 @@ final class SearchPanelController: NSObject {
     private var allWindows: [WindowItem] = []
     private var filteredWindows: [WindowItem] = []
     private var sourceWindow: WindowItem?
+    private var sourceLearningWindow: WindowItem?
 
     init(catalog: WindowCatalog) {
         self.catalog = catalog
@@ -53,18 +54,31 @@ final class SearchPanelController: NSObject {
     func hide() {
         panel.orderOut(nil)
         sourceWindow = nil
+        sourceLearningWindow = nil
     }
 
     func reloadWindowList() {
         if AccessibilityPermission.isTrusted {
+            let sourceFocusSnapshot = WindowRanking.captureCurrentFocus()
+            let verifiedSourceFocusSnapshot = catalog.captureStrictFocusSnapshot()
             allWindows = catalog.allWindows()
-            sourceWindow = WindowRanking.currentWindow(in: allWindows)
-            if let sourceWindow {
-                WindowSelectionMemory.shared.recordObservation(sourceWindow)
+            sourceWindow = WindowRanking.currentWindow(
+                in: allWindows,
+                focusSnapshot: sourceFocusSnapshot
+            )
+            sourceLearningWindow = verifiedSourceFocusSnapshot.flatMap { snapshot in
+                catalog.strictlyFocusedWindow(in: allWindows, snapshot: snapshot)
+            }
+            if let sourceLearningWindow, let verifiedSourceFocusSnapshot {
+                WindowSelectionMemory.shared.recordObservation(
+                    sourceLearningWindow,
+                    observedAt: verifiedSourceFocusSnapshot.capturedAt
+                )
             }
         } else {
             allWindows = []
             sourceWindow = nil
+            sourceLearningWindow = nil
         }
 
         permissionBanner.isHidden = AccessibilityPermission.isTrusted
@@ -291,12 +305,13 @@ final class SearchPanelController: NSObject {
         if tokens.isEmpty {
             filteredWindows = WindowRanking.sortedForEmptyQuery(
                 rankedWindows.map(\.item),
-                sourceWindow: sourceWindow
+                sourceWindow: sourceLearningWindow
             )
         } else {
             filteredWindows = WindowRanking.sortedForQuery(
                 rankedWindows,
-                sourceWindow: sourceWindow
+                catalogItems: allWindows,
+                sourceWindow: sourceLearningWindow
             )
         }
 
@@ -370,18 +385,23 @@ final class SearchPanelController: NSObject {
         }
 
         let item = filteredWindows[row]
-        let source = sourceWindow
+        let source = sourceLearningWindow
         let query = searchField.stringValue
+        let selectedAt = Date().timeIntervalSince1970
         hide()
-        catalog.activate(item) { result in
-            if result == .success {
+        catalog.activate(item, initiatedAt: selectedAt) { result in
+            switch result {
+            case .focused(let focusedWindow):
                 WindowSelectionMemory.shared.recordSelection(
-                    item,
+                    focusedWindow,
                     query: query,
-                    from: source
+                    from: source,
+                    selectedAt: selectedAt
                 )
-            } else {
+            case .failed:
                 NSSound.beep()
+            case .superseded:
+                break
             }
         }
     }

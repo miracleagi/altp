@@ -11,7 +11,6 @@ enum WindowRanking {
         let item: WindowItem
         let baseScore: Int
         let sessionScore: Double
-        let sessionInteractionCount: Int
         let persistentRank: WindowPersistentRank
     }
 
@@ -80,11 +79,16 @@ enum WindowRanking {
         _ items: [WindowItem],
         sourceWindow: WindowItem?
     ) -> [WindowItem] {
-        sorted(items, sourceWindow: sourceWindow) { _ in 0 }
+        sorted(
+            items,
+            catalogItems: items,
+            sourceWindow: sourceWindow
+        ) { _ in 0 }
     }
 
     static func sortedForQuery(
         _ items: [(item: WindowItem, score: Int)],
+        catalogItems: [WindowItem],
         sourceWindow: WindowItem?
     ) -> [WindowItem] {
         let scoreByItem = Dictionary(
@@ -92,56 +96,68 @@ enum WindowRanking {
                 (ObjectIdentifier(candidate.item), candidate.score)
             }
         )
-        return sorted(items.map(\.item), sourceWindow: sourceWindow) { item in
+        return sorted(
+            items.map(\.item),
+            catalogItems: catalogItems,
+            sourceWindow: sourceWindow
+        ) { item in
             scoreByItem[ObjectIdentifier(item)] ?? 0
         }
     }
 
     private static func sorted(
         _ items: [WindowItem],
+        catalogItems: [WindowItem],
         sourceWindow: WindowItem?,
         baseScore: (WindowItem) -> Int
     ) -> [WindowItem] {
         let referenceTime = Date().timeIntervalSince1970
-        let evaluated = items.map { item in
-            let sessionRank = WindowSelectionMemory.shared.sessionRank(
-                for: item,
-                from: sourceWindow,
-                referenceTime: referenceTime
-            )
-            return EvaluatedWindow(
-                item: item,
-                baseScore: baseScore(item),
-                sessionScore: WindowRankingPolicy.sessionScore(
-                    for: sessionRank,
-                    referenceTime: referenceTime
-                ),
-                sessionInteractionCount: sessionRank.interactionCount,
-                persistentRank: WindowSelectionMemory.shared.persistentRank(
-                    for: item,
-                    referenceTime: referenceTime
+        let catalogEvaluation = evaluate(
+            catalogItems,
+            sourceWindow: sourceWindow,
+            referenceTime: referenceTime
+        ) { _ in 0 }
+        let catalogEvaluationByItem = Dictionary(
+            uniqueKeysWithValues: catalogEvaluation.map { candidate in
+                (ObjectIdentifier(candidate.item), candidate)
+            }
+        )
+        let evaluated = items.map { item -> EvaluatedWindow in
+            if let candidate = catalogEvaluationByItem[ObjectIdentifier(item)] {
+                return EvaluatedWindow(
+                    item: candidate.item,
+                    baseScore: baseScore(item),
+                    sessionScore: candidate.sessionScore,
+                    persistentRank: candidate.persistentRank
                 )
-            )
+            }
+
+            return evaluate(
+                [item],
+                sourceWindow: sourceWindow,
+                referenceTime: referenceTime,
+                baseScore: baseScore
+            )[0]
         }
 
-        let fallbackRepresentatives = applicationFallbackRepresentatives(in: evaluated)
+        let fallbackRepresentatives = applicationFallbackRepresentatives(
+            in: catalogEvaluation
+        )
         let ranked = evaluated.map { candidate -> RankedWindow in
             let item = candidate.item
-            let isFallbackRepresentative = fallbackRepresentatives[item.appMemoryKey] == item.catalogIndex
+            let isFallbackRepresentative = fallbackRepresentatives[item.appSessionKey] == item.catalogIndex
             let applicationFallbackScore = isFallbackRepresentative
                 ? candidate.persistentRank.appScore
                 : 0
-            let totalScore = Double(candidate.baseScore)
-                + candidate.sessionScore
-                + candidate.persistentRank.windowScore
+            let persistentScore = candidate.persistentRank.windowScore
                 + applicationFallbackScore
 
             return RankedWindow(
                 item: item,
                 sortKey: WindowSortKey(
-                    totalScore: totalScore,
+                    relevanceScore: candidate.baseScore,
                     sessionScore: candidate.sessionScore,
-                    sessionInteractionCount: candidate.sessionInteractionCount,
+                    persistentScore: persistentScore,
                     windowScore: candidate.persistentRank.windowScore,
                     applicationFallbackScore: applicationFallbackScore,
                     hasMeaningfulTitle: item.hasMeaningfulTitle,
@@ -161,31 +177,48 @@ enum WindowRanking {
             .map { $0.item }
     }
 
+    private static func evaluate(
+        _ items: [WindowItem],
+        sourceWindow: WindowItem?,
+        referenceTime: TimeInterval,
+        baseScore: (WindowItem) -> Int
+    ) -> [EvaluatedWindow] {
+        items.map { item in
+            let sessionRank = WindowSelectionMemory.shared.sessionRank(
+                for: item,
+                from: sourceWindow,
+                referenceTime: referenceTime
+            )
+            return EvaluatedWindow(
+                item: item,
+                baseScore: baseScore(item),
+                sessionScore: WindowRankingPolicy.sessionScore(
+                    for: sessionRank,
+                    referenceTime: referenceTime
+                ),
+                persistentRank: WindowSelectionMemory.shared.persistentRank(
+                    for: item,
+                    referenceTime: referenceTime
+                )
+            )
+        }
+    }
+
     private static func applicationFallbackRepresentatives(
         in evaluated: [EvaluatedWindow]
     ) -> [String: Int] {
-        let groupedByApplication = Dictionary(grouping: evaluated) { candidate in
-            candidate.item.appMemoryKey
-        }
-
-        return groupedByApplication.reduce(into: [:]) { result, group in
-            let candidates = group.value
-            let representative = WindowRankingPolicy.applicationFallbackRepresentative(
-                candidates: candidates.map { candidate in
-                    WindowApplicationFallbackCandidate(
-                        identifier: candidate.item.catalogIndex,
-                        sessionScore: candidate.sessionScore,
-                        visualOrder: candidate.item.order,
-                        catalogIndex: candidate.item.catalogIndex
-                    )
-                },
-                hasWindowHistory: candidates.contains { candidate in
-                    candidate.persistentRank.windowScore > 0
-                }
-            )
-            if let representative {
-                result[group.key] = representative
+        WindowRankingPolicy.applicationFallbackRepresentatives(
+            candidates: evaluated.map { candidate in
+                WindowApplicationFallbackCandidate(
+                    applicationIdentifier: candidate.item.appSessionKey,
+                    identifier: candidate.item.catalogIndex,
+                    sessionScore: candidate.sessionScore,
+                    visualOrder: candidate.item.order,
+                    catalogIndex: candidate.item.catalogIndex,
+                    hasWindowHistory: candidate.persistentRank.windowScore > 0
+                )
             }
-        }
+        )
     }
+
 }

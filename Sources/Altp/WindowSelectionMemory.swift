@@ -4,8 +4,9 @@ final class WindowSelectionMemory {
     static let shared = WindowSelectionMemory()
 
     private enum DefaultsKey {
-        static let snapshot = "windowSelectionMemory.v3"
-        static let legacySnapshot = "windowSelectionMemory.v2"
+        static let snapshot = "windowSelectionMemory.v4"
+        static let legacySnapshot = "windowSelectionMemory.v3"
+        static let olderSnapshot = "windowSelectionMemory.v2"
         static let oldestSnapshot = "windowSelectionMemory.v1"
     }
 
@@ -51,9 +52,14 @@ final class WindowSelectionMemory {
     private let maxSessionTransitions = 800
     private let maxQueriesPerRecord = 24
 
+    private let defaults: UserDefaults
     private var cachedSnapshot: Snapshot?
     private var sessionRecords: [String: SessionRecord] = [:]
     private var sessionTransitions: [String: TransitionRecord] = [:]
+
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+    }
 
     func queryBonus(for item: WindowItem, query: String) -> Int {
         let normalizedQuery = Self.normalizedQuery(query)
@@ -153,9 +159,13 @@ final class WindowSelectionMemory {
         trimSessionRecords()
     }
 
-    func recordSelection(_ item: WindowItem, query: String, from source: WindowItem? = nil) {
+    func recordSelection(
+        _ item: WindowItem,
+        query: String,
+        from source: WindowItem? = nil,
+        selectedAt: TimeInterval = Date().timeIntervalSince1970
+    ) {
         let normalizedQuery = Self.normalizedQuery(query)
-        let selectedAt = Date().timeIntervalSince1970
 
         if let source {
             recordSessionActivity(source, at: selectedAt, incrementSelectionCount: false)
@@ -172,7 +182,10 @@ final class WindowSelectionMemory {
                 lastSelectedAt: 0
             )
             transition.selectionCount += 1
-            transition.lastSelectedAt = selectedAt
+            transition.lastSelectedAt = max(
+                transition.lastSelectedAt,
+                selectedAt
+            )
             sessionTransitions[transitionKey] = transition
         }
 
@@ -186,7 +199,7 @@ final class WindowSelectionMemory {
             )
             downgradeIfNeeded(&record, for: item.appSessionKey)
             record.selectionCount += 1
-            record.lastSelectedAt = selectedAt
+            record.lastSelectedAt = max(record.lastSelectedAt, selectedAt)
 
             if !normalizedQuery.isEmpty {
                 record.queryHits[normalizedQuery, default: 0] += 1
@@ -203,7 +216,10 @@ final class WindowSelectionMemory {
         )
         downgradeIfNeeded(&appRecord, for: item.appSessionKey)
         appRecord.selectionCount += 1
-        appRecord.lastSelectedAt = selectedAt
+        appRecord.lastSelectedAt = max(
+            appRecord.lastSelectedAt,
+            selectedAt
+        )
 
         if !normalizedQuery.isEmpty {
             appRecord.queryHits[normalizedQuery, default: 0] += 1
@@ -236,10 +252,31 @@ final class WindowSelectionMemory {
             return cachedSnapshot
         }
 
-        for key in [DefaultsKey.snapshot, DefaultsKey.legacySnapshot, DefaultsKey.oldestSnapshot] {
-            if let data = UserDefaults.standard.data(forKey: key),
-               let snapshot = try? JSONDecoder().decode(Snapshot.self, from: data) {
+        if let data = defaults.data(forKey: DefaultsKey.snapshot),
+           let decodedSnapshot = try? JSONDecoder().decode(Snapshot.self, from: data) {
+            var snapshot = sanitizedCurrentSnapshot(decodedSnapshot)
+            trimRecords(in: &snapshot)
+            trimAppRecords(in: &snapshot)
+            cachedSnapshot = snapshot
+            if snapshot.records.count != decodedSnapshot.records.count
+                || snapshot.appRecords.count != decodedSnapshot.appRecords.count {
+                save(snapshot)
+            }
+            return snapshot
+        }
+
+        for key in [
+            DefaultsKey.legacySnapshot,
+            DefaultsKey.olderSnapshot,
+            DefaultsKey.oldestSnapshot
+        ] {
+            if let data = defaults.data(forKey: key),
+               let legacySnapshot = try? JSONDecoder().decode(Snapshot.self, from: data) {
+                var snapshot = migratedLegacySnapshot(legacySnapshot)
+                trimRecords(in: &snapshot)
+                trimAppRecords(in: &snapshot)
                 cachedSnapshot = snapshot
+                save(snapshot)
                 return snapshot
             }
         }
@@ -254,7 +291,93 @@ final class WindowSelectionMemory {
             return
         }
 
-        UserDefaults.standard.set(data, forKey: DefaultsKey.snapshot)
+        defaults.set(data, forKey: DefaultsKey.snapshot)
+    }
+
+    private func sanitizedCurrentSnapshot(_ snapshot: Snapshot) -> Snapshot {
+        Snapshot(
+            records: snapshot.records.filter { key, _ in
+                WindowIdentityPolicy.isCurrentPersistentKey(key)
+            },
+            appRecords: snapshot.appRecords.filter { key, _ in
+                !key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            }
+        )
+    }
+
+    private func migratedLegacySnapshot(_ legacySnapshot: Snapshot) -> Snapshot {
+        var migrated = Snapshot()
+
+        for (legacyKey, record) in legacySnapshot.records {
+            guard let key = WindowIdentityPolicy.migratedLegacyPersistentKey(
+                legacyKey
+            ) else {
+                continue
+            }
+            migrated.records[key] = mergedRecord(
+                migrated.records[key],
+                with: record
+            )
+        }
+
+        for (legacyKey, record) in legacySnapshot.appRecords {
+            let key = WindowIdentityPolicy.applicationKey(
+                bundleIdentifier: legacyKey,
+                appName: legacyKey
+            )
+            guard !key.isEmpty else {
+                continue
+            }
+            migrated.appRecords[key] = mergedRecord(
+                migrated.appRecords[key],
+                with: record
+            )
+        }
+
+        return migrated
+    }
+
+    private func mergedRecord(
+        _ existing: Record?,
+        with incoming: Record
+    ) -> Record {
+        guard var merged = existing else {
+            var record = incoming
+            record.selectionCount = max(0, record.selectionCount)
+            record.lastSelectedAt = max(0, record.lastSelectedAt)
+            record.queryHits = record.queryHits.filter { _, count in
+                count > 0
+            }
+            trimQueries(in: &record)
+            return record
+        }
+
+        let existingLastSelectedAt = merged.lastSelectedAt
+        merged.selectionCount = saturatingSum(
+            max(0, merged.selectionCount),
+            max(0, incoming.selectionCount)
+        )
+        merged.lastSelectedAt = max(
+            existingLastSelectedAt,
+            incoming.lastSelectedAt
+        )
+        if incoming.lastSelectedAt >= existingLastSelectedAt {
+            merged.appSessionKey = incoming.appSessionKey
+        }
+
+        for (query, count) in incoming.queryHits where count > 0 {
+            merged.queryHits[query] = saturatingSum(
+                max(0, merged.queryHits[query] ?? 0),
+                count
+            )
+        }
+        trimQueries(in: &merged)
+        return merged
+    }
+
+    private func saturatingSum(_ lhs: Int, _ rhs: Int) -> Int {
+        let (sum, overflow) = lhs.addingReportingOverflow(rhs)
+        return overflow ? Int.max : sum
     }
 
     private func downgradeIfNeeded(_ record: inout Record, for appSessionKey: String) {

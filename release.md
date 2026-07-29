@@ -8,6 +8,13 @@ Signed downloads, checksums, and notarization details are available on
 
 - No unreleased changes.
 
+## [v0.1.14](https://github.com/miracleagi/altp/releases/tag/v0.1.14) - 2026-07-29
+
+- Kept frequently used Cursor workspaces distinct so activity in one window no longer raises every Cursor window.
+- Made recent real foreground switches outrank stale frequency and transition history.
+- Separated persistent, application-session, and runtime window identities to avoid carrying exact-window rank across application restarts.
+- Verified asynchronous activation against the actual focused AX window, while rebinding synthetic fallback targets through a fresh catalog.
+
 ## [v0.1.13](https://github.com/miracleagi/altp/releases/tag/v0.1.13) - 2026-07-29
 
 - Ensured three-row Quick Switch grids, including about 22 windows, fit completely without hidden rows or unnecessary scrolling.

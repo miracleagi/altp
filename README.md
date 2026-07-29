@@ -171,6 +171,7 @@ Run the regression harnesses:
 ./scripts/verify_quick_switch_layout.sh
 ./scripts/verify_window_ranking.sh
 ./scripts/verify_window_catalog.sh
+./scripts/verify_window_activation.sh
 ```
 
 The default bundle identifier is `com.miracleagi.altp`. App icon sources are under `assets/`; regenerate the packaged icon with:

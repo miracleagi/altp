@@ -14,6 +14,7 @@ final class QuickSwitchPanelController: NSObject {
     private var modifierReleaseTimer: Timer?
     private var windows: [WindowItem] = []
     private var sourceWindow: WindowItem?
+    private var sourceLearningWindow: WindowItem?
     private var shouldActivateOnModifierRelease = false
     private var activationModifierFlags: NSEvent.ModifierFlags = []
     private var isActivatingSelection = false
@@ -72,6 +73,7 @@ final class QuickSwitchPanelController: NSObject {
     func hide() {
         panel.orderOut(nil)
         sourceWindow = nil
+        sourceLearningWindow = nil
         shouldActivateOnModifierRelease = false
         activationModifierFlags = []
         isActivatingSelection = false
@@ -86,6 +88,7 @@ final class QuickSwitchPanelController: NSObject {
         }
 
         let sourceFocusSnapshot = WindowRanking.captureCurrentFocus()
+        let verifiedSourceFocusSnapshot = catalog.captureStrictFocusSnapshot()
         shouldActivateOnModifierRelease = activateOnModifierRelease
         activationModifierFlags = activateOnModifierRelease
             ? AppSettings.quickSwitchShortcut.eventModifierFlags
@@ -100,10 +103,19 @@ final class QuickSwitchPanelController: NSObject {
             in: allWindows,
             focusSnapshot: sourceFocusSnapshot
         )
-        if let sourceWindow {
-            WindowSelectionMemory.shared.recordObservation(sourceWindow)
+        sourceLearningWindow = verifiedSourceFocusSnapshot.flatMap { snapshot in
+            catalog.strictlyFocusedWindow(in: allWindows, snapshot: snapshot)
         }
-        windows = WindowRanking.sortedForEmptyQuery(allWindows, sourceWindow: sourceWindow)
+        if let sourceLearningWindow, let verifiedSourceFocusSnapshot {
+            WindowSelectionMemory.shared.recordObservation(
+                sourceLearningWindow,
+                observedAt: verifiedSourceFocusSnapshot.capturedAt
+            )
+        }
+        windows = WindowRanking.sortedForEmptyQuery(
+            allWindows,
+            sourceWindow: sourceLearningWindow
+        )
         collectionView.selectionIndexPaths = []
         preferredNavigationColumn = nil
         emptyLabel.isHidden = !windows.isEmpty
@@ -519,14 +531,23 @@ final class QuickSwitchPanelController: NSObject {
         }
 
         let item = windows[row]
-        let source = sourceWindow
+        let source = sourceLearningWindow
+        let selectedAt = Date().timeIntervalSince1970
         hide()
-        catalog.activate(item) { result in
-            if result == .success {
-                WindowSelectionMemory.shared.recordSelection(item, query: "", from: source)
-            } else {
-                NSLog("Altp quick switch activation failed with AXError \(result.rawValue)")
+        catalog.activate(item, initiatedAt: selectedAt) { result in
+            switch result {
+            case .focused(let focusedWindow):
+                WindowSelectionMemory.shared.recordSelection(
+                    focusedWindow,
+                    query: "",
+                    from: source,
+                    selectedAt: selectedAt
+                )
+            case .failed(let error):
+                NSLog("Altp quick switch activation failed with AXError \(error.rawValue)")
                 NSSound.beep()
+            case .superseded:
+                break
             }
         }
     }

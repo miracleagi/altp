@@ -15,16 +15,18 @@ struct WindowPersistentRank: Equatable {
 }
 
 struct WindowApplicationFallbackCandidate: Equatable {
+    let applicationIdentifier: String
     let identifier: Int
     let sessionScore: Double
     let visualOrder: Int
     let catalogIndex: Int
+    let hasWindowHistory: Bool
 }
 
 struct WindowSortKey: Equatable {
-    let totalScore: Double
+    let relevanceScore: Int
     let sessionScore: Double
-    let sessionInteractionCount: Int
+    let persistentScore: Double
     let windowScore: Double
     let applicationFallbackScore: Double
     let hasMeaningfulTitle: Bool
@@ -39,6 +41,8 @@ enum WindowRankingPolicy {
     static let previousSessionMultiplier = 0.2
     static let previousSessionSelectionCap = 3
     static let persistentHalfLifeDays = 1.0
+    static let persistentHorizonDays = 7.0
+    static let persistentScoreEpsilon = 0.5
     static let sessionHalfLifeHours = 4.0
     static let sessionHorizonHours = 24.0
     static let maximumPersistentAppScore = 40.0
@@ -85,15 +89,34 @@ enum WindowRankingPolicy {
         }?.identifier
     }
 
+    static func applicationFallbackRepresentatives(
+        candidates: [WindowApplicationFallbackCandidate]
+    ) -> [String: Int] {
+        let groupedByApplication = Dictionary(grouping: candidates) {
+            $0.applicationIdentifier
+        }
+
+        return groupedByApplication.reduce(into: [:]) { result, group in
+            let candidates = group.value
+            let representative = applicationFallbackRepresentative(
+                candidates: candidates,
+                hasWindowHistory: candidates.contains(where: \.hasWindowHistory)
+            )
+            if let representative {
+                result[group.key] = representative
+            }
+        }
+    }
+
     static func prefers(_ lhs: WindowSortKey, over rhs: WindowSortKey) -> Bool {
-        if lhs.totalScore != rhs.totalScore {
-            return lhs.totalScore > rhs.totalScore
+        if lhs.relevanceScore != rhs.relevanceScore {
+            return lhs.relevanceScore > rhs.relevanceScore
         }
         if lhs.sessionScore != rhs.sessionScore {
             return lhs.sessionScore > rhs.sessionScore
         }
-        if lhs.sessionInteractionCount != rhs.sessionInteractionCount {
-            return lhs.sessionInteractionCount > rhs.sessionInteractionCount
+        if lhs.persistentScore != rhs.persistentScore {
+            return lhs.persistentScore > rhs.persistentScore
         }
         if lhs.windowScore != rhs.windowScore {
             return lhs.windowScore > rhs.windowScore
@@ -137,16 +160,22 @@ enum WindowRankingPolicy {
             return 0
         }
 
+        let ageSeconds = max(0, referenceTime - lastSelectedAt)
+        guard ageSeconds <= persistentHorizonDays * 86_400 else {
+            return 0
+        }
+
         let rawScore = min(
             maximumScore,
             log2(Double(selectionCount) + 1) * 6
         )
-        return decayedScore(
+        let score = decayedScore(
             rawScore,
             lastUsedAt: lastSelectedAt,
             halfLifeDays: persistentHalfLifeDays,
             referenceTime: referenceTime
         ) * sessionMultiplier
+        return score >= persistentScoreEpsilon ? score : 0
     }
 
     static func decayedScore(
